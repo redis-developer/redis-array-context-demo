@@ -324,10 +324,9 @@ The tests are organized into three files:
 ## Resources
 
 - [Redis 8.8 release notes](https://redis.io/blog/)
-- [RedisVL documentation](https://docs.redis.com/latest/integrate/redisvl/)
-- [LangChain tool-calling documentation](https://python.langchain.com/docs/how_to/tool_calling/)
+- [RedisVL documentation](https://docs.redisvl.com/en/latest/)
+- [LangChain tool-calling documentation](https://docs.langchain.com/oss/python/langchain/tools)
 - [OpenAI API documentation](https://platform.openai.com/docs)
-- [Redis Insight](https://redis.io/insight/)
 
 ## Maintainers
 
