@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 
 import typer
-from langchain_openai import OpenAIEmbeddings
+from redisvl.utils.vectorize import OpenAITextVectorizer
 from rich.console import Console
 from rich.table import Table
 
@@ -52,11 +52,11 @@ def _global(
 def _get_clients():
     config = load_config()
     redis_client = get_redis_client(_redis_url)
-    embeddings = OpenAIEmbeddings(
+    vectorizer = OpenAITextVectorizer(
         model="text-embedding-3-small",
-        api_key=config.openai_api_key,
+        api_config={"api_key": config.openai_api_key},
     )
-    return config, redis_client, embeddings
+    return config, redis_client, vectorizer
 
 
 def _resolve_key(key_name: str | None, filepath: str, prefix: str = CLI_PREFIX) -> str:
@@ -92,7 +92,7 @@ def load(
 
     Uses the 'cli:' key prefix to keep CLI data separate from the web app.
     """
-    config, redis_client, embeddings = _get_clients()
+    config, redis_client, vectorizer = _get_clients()
     path_str = str(filepath)
     array_key = _resolve_key(key_name, path_str)
 
@@ -105,7 +105,7 @@ def load(
     with console.status(f"Loading [bold]{filepath.name}[/bold]…"):
         final_key, final_idx = ingest_document(
             redis_client,
-            embeddings,
+            vectorizer,
             path_str,
             prefix=CLI_PREFIX,
         )
@@ -191,7 +191,7 @@ def search(
     from redisvl.index import SearchIndex
     from redisvl.query import VectorQuery
 
-    config, redis_client, embeddings = _get_clients()
+    config, redis_client, vectorizer = _get_clients()
 
     if not filepath and not key_name:
         console.print("[red]Provide --file or --key-name.[/red]")
@@ -201,7 +201,7 @@ def search(
 
     try:
         # Embedding and index setup happen outside the timer — same as backend.
-        query_vector = embeddings.embed_query(query)
+        query_vector = vectorizer.embed(query)
         vq = VectorQuery(
             vector=query_vector,
             vector_field_name="embedding",

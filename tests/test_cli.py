@@ -54,7 +54,7 @@ class TestLoadCommand:
             patch("cli.main.load_config", return_value=_mock_config()),
             patch("cli.main.get_redis_client", return_value=rc),
             patch("cli.main.ingest_document", return_value=("cli:docs:test", "cli:idx:test")),
-            patch("cli.main.OpenAIEmbeddings"),
+            patch("cli.main.OpenAITextVectorizer"),
         ):
             result = runner.invoke(app, ["load", str(md)])
 
@@ -69,7 +69,7 @@ class TestLoadCommand:
             patch("cli.main.load_config", return_value=_mock_config()),
             patch("cli.main.get_redis_client", return_value=_mock_redis()),
             patch("cli.main.ingest_document", return_value=("cli:docs:test", "cli:idx:test")),
-            patch("cli.main.OpenAIEmbeddings"),
+            patch("cli.main.OpenAITextVectorizer"),
         ):
             result = runner.invoke(app, ["load", str(md)])
 
@@ -86,7 +86,7 @@ class TestLoadCommand:
             patch("cli.main.load_config", return_value=_mock_config()),
             patch("cli.main.get_redis_client", return_value=rc),
             patch("cli.main.ingest_document", return_value=("cli:docs:test", "cli:idx:test")),
-            patch("cli.main.OpenAIEmbeddings"),
+            patch("cli.main.OpenAITextVectorizer"),
         ):
             result = runner.invoke(app, ["load", str(md), "--force"])
 
@@ -97,7 +97,7 @@ class TestLoadCommand:
         with (
             patch("cli.main.load_config", return_value=_mock_config()),
             patch("cli.main.get_redis_client", return_value=_mock_redis()),
-            patch("cli.main.OpenAIEmbeddings"),
+            patch("cli.main.OpenAITextVectorizer"),
         ):
             result = runner.invoke(app, ["load", "nonexistent.md"])
 
@@ -114,6 +114,7 @@ class TestGrepCommand:
         with (
             patch("cli.main.load_config", return_value=_mock_config()),
             patch("cli.main.get_redis_client", return_value=rc),
+            patch("cli.main.OpenAITextVectorizer"),
         ):
             return runner.invoke(app, ["grep", pattern, "--file", file])
 
@@ -146,6 +147,7 @@ class TestGrepCommand:
         with (
             patch("cli.main.load_config", return_value=_mock_config()),
             patch("cli.main.get_redis_client", return_value=_mock_redis()),
+            patch("cli.main.OpenAITextVectorizer"),
         ):
             result = runner.invoke(app, ["grep", "AOF"])
         assert result.exit_code != 0
@@ -156,6 +158,7 @@ class TestGrepCommand:
         with (
             patch("cli.main.load_config", return_value=_mock_config()),
             patch("cli.main.get_redis_client", return_value=rc),
+            patch("cli.main.OpenAITextVectorizer"),
         ):
             runner.invoke(app, ["grep", "AOF", "--file", "docs/test.md"])
 
@@ -197,10 +200,11 @@ class TestSearchCommand:
         with (
             patch("cli.main.load_config", return_value=_mock_config()),
             patch("cli.main.get_redis_client", return_value=rc),
-            patch("cli.main.OpenAIEmbeddings"),
+            patch("cli.main.OpenAITextVectorizer") as mock_vec,
             patch("redisvl.index.SearchIndex") as mock_si,
             patch("redisvl.query.VectorQuery"),
         ):
+            mock_vec.return_value.embed.return_value = [0.1] * 1536
             mock_si.from_existing.return_value = mock_idx
             return runner.invoke(app, ["search", query, "--file", file])
 
@@ -223,7 +227,7 @@ class TestSearchCommand:
         with (
             patch("cli.main.load_config", return_value=_mock_config()),
             patch("cli.main.get_redis_client", return_value=_mock_redis()),
-            patch("cli.main.OpenAIEmbeddings"),
+            patch("cli.main.OpenAITextVectorizer"),
         ):
             result = runner.invoke(app, ["search", "some query"])
         assert result.exit_code != 0
@@ -258,6 +262,7 @@ class TestChatCommand:
         with (
             patch("cli.main.load_config", return_value=_mock_config()),
             patch("cli.main.get_redis_client", return_value=_mock_redis()),
+            patch("cli.main.OpenAITextVectorizer"),
             patch("cli.main.build_executor"),
             patch("cli.main.run_turn", return_value=turn),
         ):
@@ -270,6 +275,7 @@ class TestChatCommand:
         with (
             patch("cli.main.load_config", return_value=_mock_config()),
             patch("cli.main.get_redis_client", return_value=_mock_redis()),
+            patch("cli.main.OpenAITextVectorizer"),
             patch("cli.main.build_executor"),
             patch("cli.main.run_turn", return_value=turn),
         ):
@@ -282,6 +288,7 @@ class TestChatCommand:
         with (
             patch("cli.main.load_config", return_value=_mock_config()),
             patch("cli.main.get_redis_client", return_value=_mock_redis()),
+            patch("cli.main.OpenAITextVectorizer"),
             patch("cli.main.build_executor"),
             patch("cli.main.run_turn", return_value=turn),
         ):
@@ -294,6 +301,7 @@ class TestChatCommand:
         with (
             patch("cli.main.load_config", return_value=_mock_config()),
             patch("cli.main.get_redis_client", return_value=_mock_redis()),
+            patch("cli.main.OpenAITextVectorizer"),
             patch("cli.main.build_executor"),
             patch("cli.main.run_turn", return_value=turn),
         ):
@@ -307,6 +315,7 @@ class TestChatCommand:
         with (
             patch("cli.main.load_config", return_value=_mock_config()),
             patch("cli.main.get_redis_client", return_value=_mock_redis()),
+            patch("cli.main.OpenAITextVectorizer"),
             patch("cli.main.build_executor"),
             patch("cli.main.run_turn", return_value=turn),
         ):
@@ -325,6 +334,7 @@ class TestChatCommand:
         with (
             patch("cli.main.load_config", return_value=_mock_config()),
             patch("cli.main.get_redis_client", return_value=_mock_redis()),
+            patch("cli.main.OpenAITextVectorizer"),
             patch("cli.main.build_executor"),
             patch("cli.main.run_turn", return_value=turn),
         ):
@@ -337,6 +347,7 @@ class TestChatCommand:
         with (
             patch("cli.main.load_config", return_value=_mock_config()),
             patch("cli.main.get_redis_client", return_value=_mock_redis()),
+            patch("cli.main.OpenAITextVectorizer"),
         ):
             result = runner.invoke(app, ["chat"])
         assert result.exit_code != 0
@@ -352,6 +363,7 @@ class TestChatCommand:
         with (
             patch("cli.main.load_config", return_value=_mock_config()),
             patch("cli.main.get_redis_client", return_value=_mock_redis()),
+            patch("cli.main.OpenAITextVectorizer"),
             patch("cli.main.build_executor"),
             patch("cli.main.run_turn", return_value=turn),
         ):
@@ -374,7 +386,7 @@ class TestRedisUrlOption:
             patch("cli.main.load_config", return_value=_mock_config()),
             patch("cli.main.get_redis_client", return_value=_mock_redis()) as mock_get,
             patch("cli.main.ingest_document", return_value=("cli:docs:test", "cli:idx:test")),
-            patch("cli.main.OpenAIEmbeddings"),
+            patch("cli.main.OpenAITextVectorizer"),
         ):
             runner.invoke(app, ["--redis-url", "redis://myhost:6380", "load", str(md)])
             mock_get.assert_called_with("redis://myhost:6380")
@@ -387,7 +399,7 @@ class TestRedisUrlOption:
             patch("cli.main.load_config", return_value=_mock_config()),
             patch("cli.main.get_redis_client", return_value=_mock_redis()) as mock_get,
             patch("cli.main.ingest_document", return_value=("cli:docs:test", "cli:idx:test")),
-            patch("cli.main.OpenAIEmbeddings"),
+            patch("cli.main.OpenAITextVectorizer"),
         ):
             runner.invoke(app, ["load", str(md)])
             mock_get.assert_called_with("redis://localhost:6379")

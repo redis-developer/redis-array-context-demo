@@ -246,10 +246,11 @@ def _make_redis(execute_side_effect=None):
     return client
 
 
-def _make_embeddings(vector=None):
-    emb = MagicMock()
-    emb.embed_query.return_value = vector or [0.1] * 1536
-    return emb
+def _make_vectorizer(vector=None):
+    v = MagicMock()
+    v.embed.return_value = vector or [0.1] * 1536
+    v.embed_many.return_value = [vector or [0.1] * 1536]
+    return v
 
 
 class TestFetchLinesTool:
@@ -257,14 +258,13 @@ class TestFetchLinesTool:
 
     def _get_tool(self, redis_client, array_key="web:docs:test"):
         from backend.agent import build_tools
-        tools = build_tools(redis_client, _make_embeddings(), array_key, "web:idx:test")
-        return next(t for t in tools if t.name == "fetch_lines")
+        return build_tools(redis_client, _make_vectorizer(), array_key, "web:idx:test")["fetch_lines"]
 
     def test_single_line_calls_arget(self):
         rc = _make_redis()
         rc.execute_command.side_effect = [None, "line content"]  # EXISTS pre-warm, then ARGET
         tool = self._get_tool(rc)
-        result = tool.invoke({"start_line": 5, "end_line": 5})
+        result = tool(start_line=5, end_line=5)
         arget_call = rc.execute_command.call_args_list[-1]
         assert arget_call == call("ARGET", "web:docs:test", 4)
         assert "L5: line content" in result
@@ -273,7 +273,7 @@ class TestFetchLinesTool:
         rc = _make_redis()
         rc.execute_command.side_effect = [None, ["line3", "line4", "line5"]]
         tool = self._get_tool(rc)
-        result = tool.invoke({"start_line": 3, "end_line": 5})
+        result = tool(start_line=3, end_line=5)
         argetrange_call = rc.execute_command.call_args_list[-1]
         assert argetrange_call == call("ARGETRANGE", "web:docs:test", 2, 4)
         assert "L3: line3" in result
@@ -284,14 +284,14 @@ class TestFetchLinesTool:
         rc = _make_redis()
         rc.execute_command.side_effect = [None, ["content", None, "more content"]]
         tool = self._get_tool(rc)
-        result = tool.invoke({"start_line": 1, "end_line": 3})
+        result = tool(start_line=1, end_line=3)
         assert "L2: \n" in result or result.count("L2:") == 1
 
     def test_includes_latency_in_observation(self):
         rc = _make_redis()
         rc.execute_command.side_effect = [None, "hello"]
         tool = self._get_tool(rc)
-        result = tool.invoke({"start_line": 1, "end_line": 1})
+        result = tool(start_line=1, end_line=1)
         assert "latency:" in result
         assert "ms" in result
 
@@ -299,7 +299,7 @@ class TestFetchLinesTool:
         rc = _make_redis()
         rc.execute_command.side_effect = Exception("connection refused")
         tool = self._get_tool(rc)
-        result = tool.invoke({"start_line": 1, "end_line": 1})
+        result = tool(start_line=1, end_line=1)
         assert "Error" in result
 
     def test_one_based_to_zero_based_conversion(self):
@@ -307,7 +307,7 @@ class TestFetchLinesTool:
         rc = _make_redis()
         rc.execute_command.side_effect = [None, "first line"]
         tool = self._get_tool(rc)
-        tool.invoke({"start_line": 1, "end_line": 1})
+        tool(start_line=1, end_line=1)
         arget_call = rc.execute_command.call_args_list[-1]
         assert arget_call.args[2] == 0  # 0-based index
 
@@ -315,14 +315,13 @@ class TestFetchLinesTool:
 class TestArgrepSearchTool:
     def _get_tool(self, redis_client, array_key="web:docs:test"):
         from backend.agent import build_tools
-        tools = build_tools(redis_client, _make_embeddings(), array_key, "web:idx:test")
-        return next(t for t in tools if t.name == "argrep_search")
+        return build_tools(redis_client, _make_vectorizer(), array_key, "web:idx:test")["argrep_search"]
 
     def test_plain_text_wrapped_in_glob(self):
         rc = _make_redis()
         rc.execute_command.side_effect = [5, []]  # ARLEN, ARGREP
         tool = self._get_tool(rc)
-        tool.invoke({"pattern": "AOF"})
+        tool(pattern="AOF")
         argrep_call = rc.execute_command.call_args_list[-1]
         assert argrep_call.args[4] == "GLOB"
         assert argrep_call.args[5] == "*AOF*"
@@ -331,7 +330,7 @@ class TestArgrepSearchTool:
         rc = _make_redis()
         rc.execute_command.side_effect = [5, []]
         tool = self._get_tool(rc)
-        tool.invoke({"pattern": "## *"})
+        tool(pattern="## *")
         argrep_call = rc.execute_command.call_args_list[-1]
         assert argrep_call.args[4] == "GLOB"
         assert argrep_call.args[5] == "## *"
@@ -340,7 +339,7 @@ class TestArgrepSearchTool:
         rc = _make_redis()
         rc.execute_command.side_effect = [5, []]
         tool = self._get_tool(rc)
-        tool.invoke({"pattern": "^save "})
+        tool(pattern="^save ")
         argrep_call = rc.execute_command.call_args_list[-1]
         assert argrep_call.args[4] == "RE"
 
@@ -348,7 +347,7 @@ class TestArgrepSearchTool:
         rc = _make_redis()
         rc.execute_command.side_effect = [5, [[2, "AOF is fast"], [7, "AOF flushes"]]]
         tool = self._get_tool(rc)
-        result = tool.invoke({"pattern": "AOF"})
+        result = tool(pattern="AOF")
         assert "L3: AOF is fast" in result   # 0-based index 2 → line 3
         assert "L8: AOF flushes" in result
 
@@ -356,28 +355,27 @@ class TestArgrepSearchTool:
         rc = _make_redis()
         rc.execute_command.side_effect = [5, []]
         tool = self._get_tool(rc)
-        result = tool.invoke({"pattern": "NOTFOUND"})
+        result = tool(pattern="NOTFOUND")
         assert "No lines matched" in result
 
     def test_includes_latency(self):
         rc = _make_redis()
         rc.execute_command.side_effect = [5, [[0, "some line"]]]
         tool = self._get_tool(rc)
-        result = tool.invoke({"pattern": "some"})
+        result = tool(pattern="some")
         assert "latency:" in result
 
 
 class TestCountLinesTool:
     def _get_tool(self, redis_client, array_key="web:docs:test"):
         from backend.agent import build_tools
-        tools = build_tools(redis_client, _make_embeddings(), array_key, "web:idx:test")
-        return next(t for t in tools if t.name == "count_lines")
+        return build_tools(redis_client, _make_vectorizer(), array_key, "web:idx:test")["count_lines"]
 
     def test_calls_arlen(self):
         rc = _make_redis()
         rc.execute_command.side_effect = [None, 42]  # EXISTS pre-warm, ARLEN
         tool = self._get_tool(rc)
-        result = tool.invoke({})
+        result = tool()
         arlen_call = rc.execute_command.call_args_list[-1]
         assert arlen_call.args[0] == "ARLEN"
         assert "42" in result
@@ -386,12 +384,12 @@ class TestCountLinesTool:
         rc = _make_redis()
         rc.execute_command.side_effect = [None, 10]
         tool = self._get_tool(rc)
-        result = tool.invoke({})
+        result = tool()
         assert "latency:" in result
 
     def test_redis_error_returns_error_string(self):
         rc = _make_redis()
         rc.execute_command.side_effect = Exception("ARLEN failed")
         tool = self._get_tool(rc)
-        result = tool.invoke({})
+        result = tool()
         assert "Error" in result

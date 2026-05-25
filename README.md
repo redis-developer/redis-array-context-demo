@@ -2,7 +2,7 @@
 
 ## Overview
 
-This demo showcases the **Redis Array** data type introduced in Redis 8.8 as a context retrieval layer for AI agents. Built with Python, LangChain, FastAPI, and OpenAI, it demonstrates how Redis Arrays give agents a native way to store and retrieve text where line position and exactness matter, complementing rather than replacing semantic vector search.
+This demo showcases the **Redis Array** data type introduced in Redis 8.8 as a context retrieval layer for AI agents. Built with Python, FastAPI, OpenAI, and RedisVL, it demonstrates how Redis Arrays give agents a native way to store and retrieve text where line position and exactness matter, complementing rather than replacing semantic vector search.
 
 The demo runs as a web app and a CLI. You load a Markdown document into a Redis Array, then ask questions through a chat interface. The agent decides at runtime whether to use exact Array operations (ARGREP, ARGET, ARGETRANGE, ARLEN) or vector similarity search (FT.SEARCH). The right panel shows full observability of which path was taken, the exact Redis command executed, and the latency of the Redis round trip.
 
@@ -62,7 +62,7 @@ The demo runs as a web app and a CLI. You load a Markdown document into a Redis 
 | Variable | Required | Description |
 |:---------|:--------:|:------------|
 | `REDIS_URL` | Yes | Redis connection URL. Use `redis://redis-database:6379` for Docker, `redis://localhost:6379` for local. |
-| `OPENAI_API_KEY` | Yes | API key used by the LangChain agent and embeddings. |
+| `OPENAI_API_KEY` | Yes | API key used by the agent and embeddings. |
 | `OPENAI_MODEL` | No | OpenAI model for agent responses. Defaults to `gpt-4.1-mini`. |
 | `DEMO_MARKDOWN_FILE` | Yes | Path to the Markdown file loaded into Redis at startup. |
 | `CLI_REDIS_URL` | No | Redis URL used by the CLI. Defaults to `redis://localhost:6379`. |
@@ -162,7 +162,7 @@ Latency is shown at sub-millisecond precision (µs for fast commands, ms otherwi
 
 One agent turn runs as follows:
 
-1. The user's message is passed to a LangChain tool-calling agent with four tools bound to it: `count_lines`, `fetch_lines`, `argrep_search`, and `vector_search`.
+1. The user's message is passed to a tool-calling agent with four tools bound to it: `count_lines`, `fetch_lines`, `argrep_search`, and `vector_search`.
 2. The LLM selects a tool (or no tool) and returns a tool call.
 3. The selected tool issues a Redis command — ARLEN, ARGET, ARGETRANGE, ARGREP, or FT.SEARCH — and times only the Redis round-trip using `perf_counter_ns()`. A pre-warm `execute_command` call runs before the timer to ensure the connection pool returns a warm socket.
 4. The tool result is fed back to the LLM as a `ToolMessage`. The LLM generates the final response.
@@ -325,7 +325,7 @@ The tests are organized into three files:
 
 - [Redis 8.8 release notes](https://redis.io/blog/)
 - [RedisVL documentation](https://docs.redisvl.com/en/latest/)
-- [LangChain tool-calling documentation](https://docs.langchain.com/oss/python/langchain/tools)
+- [OpenAI function-calling documentation](https://platform.openai.com/docs/guides/function-calling)
 - [OpenAI API documentation](https://platform.openai.com/docs)
 
 ## Maintainers

@@ -16,7 +16,7 @@ def mock_redis():
 
 @pytest.fixture
 def mock_agent_executor():
-    """A mock LangChain AgentExecutor."""
+    """A mock AgentExecutor."""
     executor = MagicMock()
     executor.invoke.return_value = {
         "output": "This is a test answer.",

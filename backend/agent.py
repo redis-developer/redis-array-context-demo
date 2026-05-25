@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -9,14 +10,13 @@ from functools import lru_cache
 from typing import Any
 
 import numpy as np
+import openai
 import redis
 from dotenv import load_dotenv
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
-from langchain_core.tools import tool
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from redisvl.index import SearchIndex
 from redisvl.query import VectorQuery
 from redisvl.schema import IndexSchema
+from redisvl.utils.vectorize import OpenAITextVectorizer
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -93,12 +93,12 @@ def get_redis_client(redis_url: str) -> redis.Redis:
 # Ingestion
 # ---------------------------------------------------------------------------
 
-VECTOR_DIM = 1536  # text-embedding-3-small / ada-002 dimension
+VECTOR_DIM = 1536  # text-embedding-3-small dimension
 
 
 def ingest_document(
     redis_client: redis.Redis,
-    embeddings: OpenAIEmbeddings,
+    vectorizer: OpenAITextVectorizer,
     filepath: str,
     prefix: str = WEB_PREFIX,
 ) -> tuple[str, str]:
@@ -122,8 +122,6 @@ def ingest_document(
     logger.info("Ingesting %s into Redis Array %s (%d lines)…", filepath, array_key, len(lines))
 
     # ARINSERT appends one or more values at the Array's internal insert cursor.
-    # A fresh key starts with cursor at 0, so sequential ARINSERT calls produce
-    # accurate 0-based index positions that match the original file line numbers.
     # Batch in chunks of 500 to stay well within Redis command-size limits.
     BATCH = 500
     for i in range(0, len(lines), BATCH):
@@ -140,7 +138,7 @@ def ingest_document(
         if line.strip() and not re.match(r'^(`{3,}|~{3,}|-{3,}|={3,})\s*\S*\s*$', line.strip())
     ]
     texts = [line for _, line in non_blank]
-    vectors = embeddings.embed_documents(texts)
+    vectors = vectorizer.embed_many(texts)
 
     schema = IndexSchema.from_dict({
         "index": {"name": index_name, "prefix": f"{index_name}:chunk"},
@@ -216,45 +214,15 @@ class TurnResult:
 
 
 # ---------------------------------------------------------------------------
-# Tool factory
+# Tool implementations
 # ---------------------------------------------------------------------------
 
-def build_tools(
-    redis_client: redis.Redis,
-    embeddings: OpenAIEmbeddings,
-    array_key: str,
-    index_name: str,
-) -> list:
-    """
-    Return the three LangChain tools bound to a specific Redis Array key and
-    vector index. Producing tools via a factory keeps the agent stateless at
-    the module level while letting the document key vary between CLI and web.
-    """
-
-    @tool
+def _make_argrep_search(redis_client: redis.Redis, array_key: str):
     def argrep_search(pattern: str) -> str:
-        """
-        Use this when the user asks to find lines matching a specific term,
-        command, flag, configuration option, error message, heading, or any
-        literal string — regardless of how they phrase it.
-
-        Examples of requests that should use this tool:
-        - "find all headings"
-        - "show lines containing AOF"
-        - "find the line with the save directive"
-        - "what lines mention replication?"
-        - "find every line that starts with a #"
-
-        The pattern supports exact match, glob wildcards (e.g. '## *'), and
-        regex patterns. Returns matching lines with their 1-based line numbers.
-        """
         try:
-            # Pre-warm: get array length (also needed for the range arg).
-            # Done outside the timer so connection acquisition cost is excluded.
             array_len = redis_client.execute_command("ARLEN", array_key)
             end_idx = max(int(array_len) - 1, 0)
             match_type, effective_pattern = _effective_argrep_pattern(pattern)
-            # Timer starts here — measures only the ARGREP round-trip.
             _t0 = time.perf_counter_ns()
             raw = redis_client.execute_command(
                 "ARGREP", array_key, 0, end_idx, match_type, effective_pattern, "WITHVALUES"
@@ -263,9 +231,6 @@ def build_tools(
         except Exception as exc:
             return f"Error running ARGREP: {exc}"
 
-        # ARGREP with WITHVALUES returns nested pairs: [[idx, value], [idx, value], …]
-        # (Each match is its own 2-element sub-array, not a flat interleaved list.)
-        # The array is 0-based internally; add 1 so displayed line numbers are 1-based.
         results = []
         for pair in (raw or []):
             results.append({"line": int(pair[0]) + 1, "content": pair[1]})
@@ -276,27 +241,18 @@ def build_tools(
         lines = "\n".join(f"L{r['line']}: {r['content']}" for r in results)
         return f"Matched {len(results)} line(s) (latency: {elapsed}ms):\n{lines}"
 
-    @tool
+    return argrep_search
+
+
+def _make_vector_search(
+    redis_client: redis.Redis,
+    vectorizer: OpenAITextVectorizer,
+    array_key: str,
+    index_name: str,
+):
     def vector_search(query: str, top_k: int = 5) -> str:
-        """
-        Use this when the user asks a conceptual question — how something works,
-        what something means, the purpose of a feature, or the difference between
-        two things.
-
-        Examples of requests that should use this tool:
-        - "how does AOF persistence work?"
-        - "what is the purpose of the save directive?"
-        - "explain the difference between RDB and AOF"
-        - "what are the trade-offs of using AOF?"
-
-        Do NOT use for requests that reference specific line numbers, ask to find
-        exact terms or patterns, or are structural in nature.
-        Returns the most relevant document chunks with similarity scores.
-        """
         try:
-            # Embedding and index setup happen outside the timer — only the
-            # FT.SEARCH round-trip to Redis is measured.
-            query_vector = embeddings.embed_query(query)
+            query_vector = vectorizer.embed(query)
             vq = VectorQuery(
                 vector=query_vector,
                 vector_field_name="embedding",
@@ -322,40 +278,21 @@ def build_tools(
 
         return f"Top {len(results_raw)} result(s) (latency: {elapsed}ms):\n" + "\n".join(lines)
 
-    @tool
+    return vector_search
+
+
+def _make_fetch_lines(redis_client: redis.Redis, array_key: str):
     def fetch_lines(start_line: int, end_line: int) -> str:
-        """
-        ALWAYS use this when the user mentions a specific line number — even if
-        they phrase it casually:
-        - "show me line 43"
-        - "what is on line 43?"
-        - "I want to see line 43 of the document"
-        - "show me lines 40 to 50"
-        - "line 12 please"
-
-        Also use this to expand context around a line number returned by
-        argrep_search — for example, if line 42 matched a heading, fetch lines
-        42 to 55 to retrieve the full section body.
-
-        Provide start and end as 1-based line numbers (inclusive), exactly as
-        humans count lines in a file. To fetch a single line set start_line and
-        end_line to the same value.
-        """
-        # Convert from 1-based (human) to 0-based (array index)
         start_idx = start_line - 1
         end_idx = end_line - 1
         try:
-            # Pre-warm: use execute_command (not ping) so the pool returns the
-            # same warm connection for the timed command that follows.
             redis_client.execute_command("ARLEN", array_key)
             if start_idx == end_idx:
-                # Timer wraps only the ARGET command round-trip.
                 _t0 = time.perf_counter_ns()
                 value = redis_client.execute_command("ARGET", array_key, start_idx)
                 elapsed = round((time.perf_counter_ns() - _t0) / 1_000_000, 3)
                 raw = [value] if value is not None else []
             else:
-                # Timer wraps only the ARGETRANGE command round-trip.
                 _t0 = time.perf_counter_ns()
                 raw = redis_client.execute_command(
                     "ARGETRANGE", array_key, start_idx, end_idx
@@ -373,14 +310,11 @@ def build_tools(
         )
         return f"Lines {start_line}–{end_line} (latency: {elapsed}ms):\n{lines}"
 
-    @tool
+    return fetch_lines
+
+
+def _make_count_lines(redis_client: redis.Redis, array_key: str):
     def count_lines() -> str:
-        """
-        Use this when the user asks how many lines the document has, or wants a
-        count or total of lines — e.g. "how many lines are in the doc?",
-        "what is the line count?", "count the lines". Uses ARLEN which returns
-        the array length in O(1) without scanning any elements.
-        """
         try:
             redis_client.execute_command("EXISTS", array_key)  # pre-warm before timing
             _t0 = time.perf_counter_ns()
@@ -390,7 +324,132 @@ def build_tools(
             return f"Error running ARLEN: {exc}"
         return f"Document has {int(count)} lines. (latency: {elapsed}ms)"
 
-    return [argrep_search, vector_search, fetch_lines, count_lines]
+    return count_lines
+
+
+def build_tools(
+    redis_client: redis.Redis,
+    vectorizer: OpenAITextVectorizer,
+    array_key: str,
+    index_name: str,
+) -> dict[str, Any]:
+    """Return a map of tool name → callable."""
+    return {
+        "argrep_search": _make_argrep_search(redis_client, array_key),
+        "vector_search": _make_vector_search(redis_client, vectorizer, array_key, index_name),
+        "fetch_lines": _make_fetch_lines(redis_client, array_key),
+        "count_lines": _make_count_lines(redis_client, array_key),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Tool schemas (OpenAI function-calling format)
+# ---------------------------------------------------------------------------
+
+TOOL_SCHEMAS: list[dict] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "argrep_search",
+            "description": (
+                "Use this when the user asks to find lines matching a specific term, "
+                "command, flag, configuration option, error message, heading, or any "
+                "literal string — regardless of how they phrase it.\n\n"
+                "Examples: \"find all headings\", \"show lines containing AOF\", "
+                "\"find the line with the save directive\", \"what lines mention replication?\", "
+                "\"find every line that starts with a #\".\n\n"
+                "The pattern supports exact match, glob wildcards (e.g. '## *'), and "
+                "regex patterns. Returns matching lines with their 1-based line numbers."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pattern": {
+                        "type": "string",
+                        "description": "The search pattern (plain text, glob, or regex).",
+                    },
+                },
+                "required": ["pattern"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "vector_search",
+            "description": (
+                "Use this when the user asks a conceptual question — how something works, "
+                "what something means, the purpose of a feature, or the difference between "
+                "two things.\n\n"
+                "Examples: \"how does AOF persistence work?\", \"what is the purpose of the "
+                "save directive?\", \"explain the difference between RDB and AOF\".\n\n"
+                "Do NOT use for requests that reference specific line numbers, ask to find "
+                "exact terms or patterns, or are structural in nature. "
+                "Returns the most relevant document chunks with similarity scores."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The natural language query to search for.",
+                    },
+                    "top_k": {
+                        "type": "integer",
+                        "description": "Number of results to return. Defaults to 5.",
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "fetch_lines",
+            "description": (
+                "ALWAYS use this when the user mentions a specific line number — even if "
+                "they phrase it casually: \"show me line 43\", \"what is on line 43?\", "
+                "\"I want to see line 43 of the document\", \"show me lines 40 to 50\", "
+                "\"line 12 please\".\n\n"
+                "Also use this to expand context around a line number returned by "
+                "argrep_search. Provide start and end as 1-based line numbers (inclusive). "
+                "To fetch a single line set start_line and end_line to the same value."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "start_line": {
+                        "type": "integer",
+                        "description": "First line to fetch (1-based, inclusive).",
+                    },
+                    "end_line": {
+                        "type": "integer",
+                        "description": "Last line to fetch (1-based, inclusive).",
+                    },
+                },
+                "required": ["start_line", "end_line"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "count_lines",
+            "description": (
+                "Use this when the user asks how many lines the document has, or wants a "
+                "count or total of lines — e.g. \"how many lines are in the doc?\", "
+                "\"what is the line count?\", \"count the lines\". Uses ARLEN which returns "
+                "the array length in O(1) without scanning any elements."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+]
 
 
 # ---------------------------------------------------------------------------
@@ -427,7 +486,9 @@ implementation details in your answers.
 
 @dataclass
 class AgentExecutor:
-    llm_with_tools: Any
+    client: openai.OpenAI
+    model: str
+    tool_schemas: list[dict]
     tool_map: dict[str, Any]
     array_key: str
     index_name: str
@@ -439,20 +500,16 @@ def build_executor(
     array_key: str,
     index_name: str,
 ) -> AgentExecutor:
-    llm = ChatOpenAI(
-        model=config.openai_model,
-        api_key=config.openai_api_key,
-        temperature=0,
-    )
-    embeddings = OpenAIEmbeddings(
+    client = openai.OpenAI(api_key=config.openai_api_key)
+    vectorizer = OpenAITextVectorizer(
         model="text-embedding-3-small",
-        api_key=config.openai_api_key,
+        api_config={"api_key": config.openai_api_key},
     )
-    tools = build_tools(redis_client, embeddings, array_key, index_name)
-    llm_with_tools = llm.bind_tools(tools)
-    tool_map = {t.name: t for t in tools}
+    tool_map = build_tools(redis_client, vectorizer, array_key, index_name)
     return AgentExecutor(
-        llm_with_tools=llm_with_tools,
+        client=client,
+        model=config.openai_model,
+        tool_schemas=TOOL_SCHEMAS,
         tool_map=tool_map,
         array_key=array_key,
         index_name=index_name,
@@ -465,9 +522,9 @@ def build_executor(
 
 def run_turn(executor: AgentExecutor, user_message: str) -> TurnResult:
     """Run one agent turn and return a structured result with tool traces."""
-    messages: list = [
-        SystemMessage(content=SYSTEM_PROMPT),
-        HumanMessage(content=user_message),
+    messages: list[dict] = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": user_message},
     ]
 
     grep_results: list[dict] = []
@@ -479,24 +536,46 @@ def run_turn(executor: AgentExecutor, user_message: str) -> TurnResult:
     tool_commands: list[str] = []
     fetch_lines_collected: list[tuple[int, int]] = []
 
-    # Agentic loop: invoke → execute tool calls → feed ToolMessages → repeat
+    # Agentic loop: invoke → execute tool calls → feed tool results → repeat
     while True:
-        response = executor.llm_with_tools.invoke(messages)
-        messages.append(response)
+        response = executor.client.chat.completions.create(
+            model=executor.model,
+            messages=messages,
+            tools=executor.tool_schemas,
+            temperature=0,
+        )
+        choice = response.choices[0]
 
-        tool_calls = getattr(response, "tool_calls", None) or []
+        # Add assistant message to history as a plain dict so the SDK can
+        # re-serialize it cleanly on subsequent loop iterations.
+        assistant_msg: dict = {"role": "assistant", "content": choice.message.content}
+        if choice.message.tool_calls:
+            assistant_msg["tool_calls"] = [
+                {
+                    "id": tc.id,
+                    "type": "function",
+                    "function": {
+                        "name": tc.function.name,
+                        "arguments": tc.function.arguments,
+                    },
+                }
+                for tc in choice.message.tool_calls
+            ]
+        messages.append(assistant_msg)
+
+        tool_calls = choice.message.tool_calls or []
         if not tool_calls:
             break
 
         for tc in tool_calls:
-            tool_name: str = tc["name"]
-            tool_args: dict = tc["args"]
-            tool_id: str = tc["id"]
+            tool_name: str = tc.function.name
+            tool_args: dict = json.loads(tc.function.arguments)
+            tool_id: str = tc.id
 
             tool_names_used.append(tool_name)
 
             tool_fn = executor.tool_map.get(tool_name)
-            observation: str = tool_fn.invoke(tool_args) if tool_fn else f"Error: unknown tool '{tool_name}'"
+            observation: str = tool_fn(**tool_args) if tool_fn else f"Error: unknown tool '{tool_name}'"
 
             latency = _parse_latency(observation)
 
@@ -546,7 +625,11 @@ def run_turn(executor: AgentExecutor, user_message: str) -> TurnResult:
                     tool_reasoning = "Counting total lines in the document."
                 tool_commands.append(f"ARLEN {executor.array_key}")
 
-            messages.append(ToolMessage(content=observation, tool_call_id=tool_id))
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tool_id,
+                "content": observation,
+            })
 
     if fetch_lines_collected and not tool_reasoning:
         parts = [str(s) if s == e else f"{s}–{e}" for s, e in fetch_lines_collected]
@@ -557,7 +640,7 @@ def run_turn(executor: AgentExecutor, user_message: str) -> TurnResult:
         else:
             tool_reasoning = f"Fetching lines {', '.join(parts[:-1])}, and {parts[-1]} by position."
 
-    assistant_message = response.content if hasattr(response, "content") else str(response)
+    assistant_message = choice.message.content or ""
     tool_used = _classify_tools(tool_names_used)
 
     return TurnResult(
@@ -622,8 +705,8 @@ def _effective_argrep_pattern(pattern: str) -> tuple[str, str]:
     Return (match_type, effective_pattern) for an ARGREP call.
 
     Plain text patterns (no regex or glob chars) are automatically wrapped in
-    glob wildcards so they act as a case-insensitive 'contains' search rather
-    than requiring the entire line to equal the pattern exactly.
+    glob wildcards so they act as a contains search rather than requiring the
+    entire line to equal the pattern exactly.
 
     Examples:
       "AOF"      → ("GLOB", "*AOF*")

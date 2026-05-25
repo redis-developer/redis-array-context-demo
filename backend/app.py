@@ -6,7 +6,7 @@ from functools import lru_cache
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from langchain_openai import OpenAIEmbeddings
+from redisvl.utils.vectorize import OpenAITextVectorizer
 from pydantic import BaseModel, Field
 
 from .agent import (
@@ -39,14 +39,14 @@ async def lifespan(app: FastAPI):
 
     _config = load_config()
     redis_client = get_redis_client(_config.redis_url)
-    embeddings = OpenAIEmbeddings(
+    vectorizer = OpenAITextVectorizer(
         model="text-embedding-3-small",
-        api_key=_config.openai_api_key,
+        api_config={"api_key": _config.openai_api_key},
     )
 
     _array_key, _index_name = ingest_document(
         redis_client,
-        embeddings,
+        vectorizer,
         _config.markdown_file,
     )
 

@@ -36,7 +36,7 @@ def client():
         patch("backend.agent.build_executor", return_value=mock_executor),
         patch("backend.agent.run_turn", return_value=_make_turn_result()),
         patch("backend.agent.load_config") as mock_cfg,
-        patch("langchain_openai.OpenAIEmbeddings"),
+        patch("redisvl.utils.vectorize.OpenAITextVectorizer"),
     ):
         mock_cfg.return_value = MagicMock(
             redis_url="redis://localhost:6379",
