@@ -103,6 +103,8 @@ The `argrep_search` tool automatically infers the match type from the pattern:
 
 ### Web UI
 
+![web-ui-sample.png](images/web-ui-sample.png)
+
 The right panel refreshes after every turn with three sections:
 
 - **Agent Decision** — which tool was selected, the reasoning, and the exact Redis command.
@@ -223,6 +225,12 @@ redis-array-context-demo/
 ## CLI
 
 The CLI lets you load documents and run Array and vector operations directly from the terminal. It uses the same backend agent and tools as the web app.
+
+The CLI requires a running Redis instance. If you are not running the full web app, start only the database container:
+
+```sh
+docker compose up -d redis-database
+```
 
 Install dependencies using your virtualenv:
 

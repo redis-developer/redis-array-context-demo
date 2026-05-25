@@ -477,6 +477,7 @@ def run_turn(executor: AgentExecutor, user_message: str) -> TurnResult:
     tool_names_used: list[str] = []
     tool_reasoning = ""
     tool_commands: list[str] = []
+    fetch_lines_collected: list[tuple[int, int]] = []
 
     # Agentic loop: invoke → execute tool calls → feed ToolMessages → repeat
     while True:
@@ -532,8 +533,7 @@ def run_turn(executor: AgentExecutor, user_message: str) -> TurnResult:
                     r["latency_ms"] = latency
                 grep_results.extend(call_results)
                 grep_latency_ms = (grep_latency_ms or 0) + (latency or 0)
-                if not tool_reasoning:
-                    tool_reasoning = f"Fetching lines {start}–{end} by position."
+                fetch_lines_collected.append((start, end))
                 s_idx, e_idx = start - 1, end - 1
                 if s_idx == e_idx:
                     tool_commands.append(f"ARGET {executor.array_key} {s_idx}")
@@ -547,6 +547,15 @@ def run_turn(executor: AgentExecutor, user_message: str) -> TurnResult:
                 tool_commands.append(f"ARLEN {executor.array_key}")
 
             messages.append(ToolMessage(content=observation, tool_call_id=tool_id))
+
+    if fetch_lines_collected and not tool_reasoning:
+        parts = [str(s) if s == e else f"{s}–{e}" for s, e in fetch_lines_collected]
+        if len(parts) == 1:
+            tool_reasoning = f"Fetching line {parts[0]} by position."
+        elif len(parts) == 2:
+            tool_reasoning = f"Fetching lines {parts[0]} and {parts[1]} by position."
+        else:
+            tool_reasoning = f"Fetching lines {', '.join(parts[:-1])}, and {parts[-1]} by position."
 
     assistant_message = response.content if hasattr(response, "content") else str(response)
     tool_used = _classify_tools(tool_names_used)
