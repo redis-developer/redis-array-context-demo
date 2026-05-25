@@ -1,0 +1,353 @@
+:root {
+  color-scheme: light;
+  --bg: #f5f7f5;
+  --panel: #ffffff;
+  --panel-soft: #f8fbf9;
+  --ink: #17212b;
+  --muted: #60717b;
+  --line: #d8e0dc;
+  --redis: #ff4438;
+  --accent: #ff4438;
+  --accent-soft: #fff0ee;
+  --accent-line: #ffb9b3;
+  --grep-color: #d97706;
+  --grep-soft: #fffbeb;
+  --grep-line: #fcd34d;
+  --vec-color: #0369a1;
+  --vec-soft: #eff6ff;
+  --vec-line: #93c5fd;
+  --shadow: 0 18px 45px rgba(23, 33, 43, 0.1);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.app-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 380px;
+  gap: 20px;
+  min-height: 100vh;
+  padding: 24px;
+}
+
+.chat-pane,
+.retrieval-pane {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+}
+
+.chat-pane {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-height: calc(100vh - 48px);
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 22px 26px;
+  border-bottom: 1px solid var(--line);
+}
+
+.eyebrow {
+  margin: 0 0 6px;
+  color: var(--redis);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+h1,
+h2,
+p {
+  margin-top: 0;
+}
+
+h1 {
+  margin-bottom: 0;
+  font-size: 28px;
+  line-height: 1.1;
+}
+
+h2 {
+  margin-bottom: 0;
+  font-size: 15px;
+}
+
+.messages {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow: auto;
+  padding: 24px 26px;
+}
+
+.message {
+  max-width: 760px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  line-height: 1.5;
+}
+
+.message.user {
+  align-self: flex-end;
+  background: #eef4f7;
+}
+
+.message.ai {
+  align-self: flex-start;
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+}
+
+.message.system {
+  align-self: center;
+  max-width: none;
+  color: var(--muted);
+  background: transparent;
+  border-style: dashed;
+}
+
+.message-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 18px 26px;
+  border-top: 1px solid var(--line);
+}
+
+.composer input {
+  min-width: 0;
+  padding: 13px 14px;
+  border: 1px solid var(--line);
+  color: var(--ink);
+}
+
+.composer input:focus {
+  border-color: var(--accent);
+  outline: 3px solid rgba(255, 68, 56, 0.16);
+}
+
+button {
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #ffffff;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+button:hover {
+  border-color: #e3362d;
+  background: #e3362d;
+}
+
+button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+/* Right panel */
+
+.retrieval-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-height: calc(100vh - 48px);
+  padding: 18px;
+  overflow: auto;
+}
+
+.retrieval-section {
+  padding: 16px;
+  background: var(--panel-soft);
+  border: 1px solid var(--line);
+}
+
+.section-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+/* Badge base — direct children only so nested spans (e.g. latency) are not uppercased */
+.section-heading > span {
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+  color: var(--redis);
+}
+
+.section-heading span.badge-grep {
+  color: var(--grep-color);
+}
+
+.section-heading span.badge-vec {
+  color: var(--vec-color);
+}
+
+.retrieval-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+#grepList,
+#vecList {
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.retrieval-list li {
+  padding: 8px 11px;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.4;
+  font-family: ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, monospace;
+}
+
+/* Truncate only actual search result rows, not tool/command rows */
+.retrieval-list.grep-active li,
+.retrieval-list.vec-active li {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  overflow: hidden;
+}
+
+.row-text {
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.retrieval-list.empty li {
+  color: var(--muted);
+  font-style: italic;
+  font-family: inherit;
+}
+
+/* Grep result items — amber tint */
+.retrieval-list.grep-active li {
+  background: var(--grep-soft);
+  border-color: var(--grep-line);
+}
+
+/* Vector result items — blue tint */
+.retrieval-list.vec-active li {
+  background: var(--vec-soft);
+  border-color: var(--vec-line);
+}
+
+/* Line-number badge inside a grep result */
+.line-num {
+  display: inline-block;
+  min-width: 36px;
+  margin-right: 8px;
+  color: var(--grep-color);
+  font-weight: 700;
+  user-select: none;
+}
+
+/* Right-aligned meta badges inside the section heading flex row */
+.result-meta {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.result-latency {
+  font-size: 14px;
+  font-weight: 900;
+  color: var(--redis);
+  text-transform: none;
+}
+
+/* Redis command line inside Agent Decision panel */
+.command-row code {
+  display: block;
+  margin-top: 4px;
+  padding: 6px 8px;
+  background: var(--surface-2, rgba(0,0,0,.06));
+  border-radius: 4px;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 0.78rem;
+  color: var(--text-primary);
+  word-break: break-all;
+}
+
+/* Per-row latency badge inside a grep/fetch result */
+.row-latency {
+  flex-shrink: 0;
+  margin-left: auto;
+  color: var(--muted);
+  font-weight: 900;
+  font-size: 11px;
+  user-select: none;
+}
+
+/* Similarity score badge inside a vector result */
+.score-badge {
+  display: inline-block;
+  min-width: 42px;
+  margin-right: 8px;
+  color: var(--vec-color);
+  font-weight: 700;
+  user-select: none;
+}
+
+@media (max-width: 920px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+    padding: 12px;
+  }
+
+  .chat-pane,
+  .retrieval-pane {
+    min-height: auto;
+  }
+
+  .topbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .composer {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Redis Arrays — Context Demo</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="chat-pane">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Redis Arrays (Redis 8.8)</p>
+            <h1>Markdown Context Agent</h1>
+          </div>
+        </header>
+
+        <div id="messages" class="messages" aria-live="polite"></div>
+
+        <form id="chatForm" class="composer">
+          <input
+            id="messageInput"
+            autocomplete="off"
+            placeholder="Ask a question, or try &quot;Show me line 43&quot;…"
+            required
+          />
+          <button id="sendButton" type="submit">Send</button>
+        </form>
+      </section>
+
+      <aside class="retrieval-pane">
+        <section class="retrieval-section">
+          <div class="section-heading">
+            <span>Tool</span>
+            <h2>Agent Decision</h2>
+          </div>
+          <ul id="toolList" class="retrieval-list empty">
+            <li>No tool used yet.</li>
+          </ul>
+        </section>
+
+        <section class="retrieval-section">
+          <div class="section-heading">
+            <span class="badge-grep">Array</span>
+            <h2>Array Command Result</h2>
+          </div>
+          <ul id="grepList" class="retrieval-list empty">
+            <li>No grep results yet.</li>
+          </ul>
+        </section>
+
+        <section class="retrieval-section">
+          <div class="section-heading">
+            <span class="badge-vec">Vector</span>
+            <h2>Vector Search Result</h2>
+          </div>
+          <ul id="vecList" class="retrieval-list empty">
+            <li>No vector results yet.</li>
+          </ul>
+        </section>
+      </aside>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
