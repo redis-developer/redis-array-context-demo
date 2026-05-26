@@ -156,7 +156,7 @@ Latency is shown at sub-millisecond precision (`µs` for fast commands, `ms` oth
 }
 ```
 
-## CLI
+### CLI
 
 The CLI lets you load documents and run Array and vector operations directly from the terminal. It uses the same backend agent and tools as the web app. The CLI requires a running Redis instance. If you are not running the full web app, start only the database container:
 
@@ -178,9 +178,9 @@ source .venv/bin/activate
 
 By default the CLI connects to `redis://localhost:6379`. Override it with `--redis-url` or the `CLI_REDIS_URL` environment variable.
 
-### Commands
+#### Commands
 
-#### `load` — Ingest a Markdown file into Redis
+##### `load` — Ingest a Markdown file into Redis
 
 ```sh
 python -m cli.main load docs/redis-persistence.md
@@ -188,7 +188,7 @@ python -m cli.main load docs/redis-persistence.md
 python -m cli.main load docs/redis-persistence.md --force
 ```
 
-#### `grep` — Run an ARGREP query
+##### `grep` — Run an ARGREP query
 
 ```sh
 # Plain text (auto-wrapped as glob *AOF*)
@@ -201,14 +201,14 @@ python -m cli.main grep "## *" --file docs/redis-persistence.md
 python -m cli.main grep "^save " --file docs/redis-persistence.md
 ```
 
-#### `search` — Run a vector similarity search
+##### `search` — Run a vector similarity search
 
 ```sh
 python -m cli.main search "how does snapshotting work?" --file docs/redis-persistence.md
 python -m cli.main search "difference between RDB and AOF" --file docs/redis-persistence.md --top-k 3
 ```
 
-#### `chat` — Start an interactive agent session
+##### `chat` — Start an interactive agent session
 
 ```sh
 python -m cli.main chat --file docs/redis-persistence.md
