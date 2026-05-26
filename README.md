@@ -329,7 +329,7 @@ The unit tests are organized into three files:
 
 ### Integration Tests
 
-The integration tests spin up a real `redis:8.8-rc1` container via [Testcontainers](https://testcontainers.com/) and exercise the Array commands (ARGET, ARGETRANGE, ARGREP, ARLEN) against actual Redis behaviour. Docker must be running.
+The integration tests spin up a real `redis:8.8.0` container via [Testcontainers](https://testcontainers.com/) and exercise the Array commands (ARGET, ARGETRANGE, ARGREP, ARLEN) against actual Redis behaviour. Docker must be running.
 
 ```sh
 pip install -e ".[test]"

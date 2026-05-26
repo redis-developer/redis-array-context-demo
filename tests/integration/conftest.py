@@ -5,7 +5,7 @@ from testcontainers.redis import RedisContainer
 
 # Match the exact image used in docker-compose.yml so integration tests
 # exercise the same Redis version as production.
-_REDIS_IMAGE = "redis:8.8-rc1"
+_REDIS_IMAGE = "redis:8.8.0"
 
 
 @pytest.fixture(scope="session")

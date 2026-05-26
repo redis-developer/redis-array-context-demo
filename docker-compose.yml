@@ -3,7 +3,7 @@ services:
   redis-database:
     container_name: redis-database
     hostname: redis-database
-    image: redis:8.8-rc1
+    image: redis:8.8.0
     volumes:
       - ./data:/data
     environment:
