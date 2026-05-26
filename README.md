@@ -11,8 +11,8 @@ The demo runs as a web app and a CLI. You load a Markdown document into a Redis 
 - [Demo Objectives](#demo-objectives)
 - [Setup](#setup)
 - [Running the Demo](#running-the-demo)
-- [Architecture](#architecture)
 - [CLI](#cli)
+- [Architecture](#architecture)
 - [Running the Tests](#running-the-tests)
 - [Known Issues](#known-issues)
 - [Resources](#resources)
@@ -21,7 +21,7 @@ The demo runs as a web app and a CLI. You load a Markdown document into a Redis 
 
 ## Demo Objectives
 
-- Demonstrate Redis 8.8 Arrays as a first-class context store for AI agents.
+- Demonstrate Redis 8.8 Arrays as a first-class context store for AI agents when line position and exactness matter.
 - Show the difference between exact retrieval (ARGREP, ARGET) and semantic retrieval (FT.SEARCH) for different query types.
 - Give the agent full observability: which tool ran, which Redis command was issued, and the actual Redis round-trip latency.
 - Illustrate how line position and exact matching complement vector search in document-grounded agents.
@@ -111,7 +111,7 @@ The right panel refreshes after every turn with three sections:
 - **Array Command Result** — matched lines with 1-based line numbers and the Redis round-trip latency.
 - **Vector Search Result** — top-k semantically relevant chunks and the Redis round-trip latency.
 
-Latency is shown at sub-millisecond precision (µs for fast commands, ms otherwise). When a tool was not used in a turn, its panel shows a dimmed "Not used this turn." state.
+Latency is shown at sub-millisecond precision (`µs` for fast commands, `ms` otherwise). When a tool was not used in a turn, its panel shows a dimmed "Not used this turn." state.
 
 ### Suggested Demo Flow
 
@@ -136,7 +136,7 @@ Latency is shown at sub-millisecond precision (µs for fast commands, ms otherwi
 
 **Request:**
 ```json
-{ "message": "Find all lines containing AOF." }
+{ "message": "Show me lines 3 to 9." }
 ```
 
 **Response:**
@@ -156,77 +156,9 @@ Latency is shown at sub-millisecond precision (µs for fast commands, ms otherwi
 }
 ```
 
-`tool_used` is one of `"grep"` | `"fetch"` | `"arlen"` | `"vector"` | `"both"` | `"none"`. Latency fields are `null` when the corresponding tool was not used.
-
-## Architecture
-
-One agent turn runs as follows:
-
-1. The user's message is passed to a tool-calling agent with four tools bound to it: `count_lines`, `fetch_lines`, `argrep_search`, and `vector_search`.
-2. The LLM selects a tool (or no tool) and returns a tool call.
-3. The selected tool issues a Redis command — ARLEN, ARGET, ARGETRANGE, ARGREP, or FT.SEARCH — and times only the Redis round-trip using `perf_counter_ns()`. A pre-warm `execute_command` call runs before the timer to ensure the connection pool returns a warm socket.
-4. The tool result is fed back to the LLM as a `ToolMessage`. The LLM generates the final response.
-5. The backend parses the tool observations to extract results and latencies, and returns a structured `TurnResult` to the API layer.
-
-### Redis Key Scheme
-
-Both the web app and CLI share one Redis instance but use distinct key prefixes to keep the keyspace readable:
-
-```
-web:docs:{slug}    # Array key — one element per document line (web app)
-web:idx:{slug}     # Vector index — non-blank, non-fence lines (web app)
-
-cli:docs:{slug}    # Array key — loaded via CLI load command
-cli:idx:{slug}     # Vector index — loaded via CLI load command
-```
-
-`{slug}` is the Markdown filename, lowercased and slugified — e.g., `redis-persistence.md` → `redis-persistence`.
-
-### Ingestion Pipeline
-
-When a Markdown file is loaded (web startup or `cli load`):
-
-1. Read the file and split into lines, preserving blank lines to maintain accurate 1-based line numbering.
-2. Write to Redis as an Array via `ARINSERT`, one element per line, in batches of 500.
-3. Filter out blank lines and markdown structural noise (code fences, horizontal rules) for the vector index.
-4. Generate embeddings for content-bearing lines using `text-embedding-3-small`.
-5. Create a RedisVL flat vector index and load the embeddings.
-
-Ingestion is idempotent — if the Array key already exists, startup skips re-ingestion.
-
-### Project Structure
-
-```
-redis-array-context-demo/
-├── backend/
-│   ├── app.py          # FastAPI routes and lifespan startup
-│   └── agent.py        # Tools, agent executor, ingestion, parsers
-├── cli/
-│   └── main.py         # Typer CLI — load, grep, search, chat commands
-├── frontend/
-│   ├── index.html
-│   ├── styles.css
-│   └── app.js
-├── docs/               # Bundled sample Markdown document
-├── tests/
-│   ├── conftest.py
-│   ├── test_agent.py   # Unit tests — parsers, tools, key helpers
-│   ├── test_api.py     # FastAPI endpoint tests
-│   └── test_cli.py     # CLI command tests via Typer CliRunner
-├── data/               # Redis persistence volume (gitignored)
-├── images/
-├── .env.example
-├── docker-compose.yml
-├── Dockerfile.backend
-├── Dockerfile.frontend
-└── pyproject.toml
-```
-
 ## CLI
 
-The CLI lets you load documents and run Array and vector operations directly from the terminal. It uses the same backend agent and tools as the web app.
-
-The CLI requires a running Redis instance. If you are not running the full web app, start only the database container:
+The CLI lets you load documents and run Array and vector operations directly from the terminal. It uses the same backend agent and tools as the web app. The CLI requires a running Redis instance. If you are not running the full web app, start only the database container:
 
 ```sh
 docker compose up -d redis-database
@@ -300,7 +232,71 @@ The `--redis-url` flag must be placed before the subcommand:
 python -m cli.main --redis-url redis://myhost:6379 chat --file docs/redis-persistence.md
 ```
 
-## Running the Tests
+## Architecture
+
+One agent turn runs as follows:
+
+1. The user's message is passed to a tool-calling agent with four tools bound to it: `count_lines`, `fetch_lines`, `argrep_search`, and `vector_search`.
+2. The LLM selects a tool (or no tool) and returns a tool call.
+3. The selected tool issues a Redis command — ARLEN, ARGET, ARGETRANGE, ARGREP, or FT.SEARCH — and times only the Redis round-trip using `perf_counter_ns()`. A pre-warm `execute_command` call runs before the timer to ensure the connection pool returns a warm socket.
+4. The tool result is fed back to the LLM as a `ToolMessage`. The LLM generates the final response.
+5. The backend parses the tool observations to extract results and latencies, and returns a structured `TurnResult` to the API layer.
+
+### Redis Key Scheme
+
+Both the web app and CLI share one Redis instance but use distinct key prefixes to keep the keyspace readable:
+
+```
+web:docs:{slug}    # Array key — one element per document line (web app)
+web:idx:{slug}     # Vector index — non-blank, non-fence lines (web app)
+
+cli:docs:{slug}    # Array key — loaded via CLI load command
+cli:idx:{slug}     # Vector index — loaded via CLI load command
+```
+
+`{slug}` is the Markdown filename, lowercased and slugified — e.g., `redis-persistence.md` → `redis-persistence`.
+
+### Ingestion Pipeline
+
+When a Markdown file is loaded (web startup or `cli load`):
+
+1. Read the file and split into lines, preserving blank lines to maintain accurate 1-based line numbering.
+2. Write to Redis as an Array via `ARINSERT`, one element per line, in batches of 500.
+3. Filter out blank lines and markdown structural noise (code fences, horizontal rules) for the vector index.
+4. Generate embeddings for content-bearing lines using `text-embedding-3-small`.
+5. Create a RedisVL flat vector index and load the embeddings.
+
+Ingestion is idempotent — if the Array key already exists, startup skips re-ingestion.
+
+### Project Structure
+
+```
+redis-array-context-demo/
+├── backend/
+│   ├── app.py          # FastAPI routes and lifespan startup
+│   └── agent.py        # Tools, agent executor, ingestion, parsers
+├── cli/
+│   └── main.py         # Typer CLI — load, grep, search, chat commands
+├── frontend/
+│   ├── index.html
+│   ├── styles.css
+│   └── app.js
+├── docs/               # Bundled sample Markdown document
+├── tests/
+│   ├── conftest.py
+│   ├── test_agent.py   # Unit tests — parsers, tools, key helpers
+│   ├── test_api.py     # FastAPI endpoint tests
+│   └── test_cli.py     # CLI command tests via Typer CliRunner
+├── data/               # Redis persistence volume (gitignored)
+├── images/
+├── .env.example
+├── docker-compose.yml
+├── Dockerfile.backend
+├── Dockerfile.frontend
+└── pyproject.toml
+```
+
+### Running the Tests
 
 The test suite requires no external services — no Redis connection, no OpenAI key. All Redis and LLM calls are mocked.
 
