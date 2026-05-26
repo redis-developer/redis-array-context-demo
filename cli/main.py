@@ -277,12 +277,13 @@ def chat(
 
         # Tool label — matches all tool types the backend can return.
         tool_label = {
-            "grep":   "Array Grep",
-            "fetch":  "Array Fetch",
-            "arlen":  "Array Len",
-            "vector": "Vector Search",
-            "both":   "Grep + Vector",
-            "none":   "No tool",
+            "grep":       "Array Grep",
+            "fetch":      "Array Fetch",
+            "grep_fetch": "Array Grep + Array Range",
+            "arlen":      "Array Len",
+            "vector":     "Vector Search",
+            "both":       "Grep + Vector",
+            "none":       "No tool",
         }.get(result.tool_used, result.tool_used)
 
         if result.tool_used != "none":

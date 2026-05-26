@@ -196,7 +196,7 @@ def document_ready(
 class TurnResult:
     user_message: str
     assistant_message: str
-    tool_used: str                          # "grep" | "vector" | "fetch" | "both" | "none"
+    tool_used: str                          # "grep" | "fetch" | "grep_fetch" | "arlen" | "vector" | "both" | "none"
     tool_reasoning: str
     tool_commands: list[str] = field(default_factory=list)  # Redis commands executed
     grep_results: list[dict[str, Any]] = field(default_factory=list)
@@ -242,7 +242,7 @@ def _make_vector_search(
     array_key: str,
     index_name: str,
 ):
-    def vector_search(query: str, top_k: int = 5) -> str:
+    def vector_search(query: str, top_k: int = 8) -> str:
         try:
             query_vector = vectorizer.embed(query)
             vq = VectorQuery(
@@ -388,7 +388,7 @@ TOOL_SCHEMAS: list[dict] = [
                     },
                     "top_k": {
                         "type": "integer",
-                        "description": "Number of results to return. Defaults to 5.",
+                        "description": "Number of results to return. Defaults to 8.",
                     },
                 },
                 "required": ["query"],
@@ -457,27 +457,12 @@ any part of the document. If the user asks you to delete, remove, edit, replace,
 add, or change content, do NOT call any tool. Instead, respond with a brief message
 explaining that this interface only supports reading and querying the document.
 
-Tool selection rules — follow these exactly:
-
-1. If the user asks how many lines the document has, or wants a line count or total
-   (e.g. "how many lines?", "count the lines", "what is the line count?"), MUST call
-   count_lines. Do NOT use argrep_search or any other tool for this.
-
-2. If the user mentions a specific line number (e.g. "line 12", "show me line 43",
-   "what is on line 7"), you MUST call fetch_lines. Do NOT use argrep_search for
-   line-number requests.
-
-3. If the user asks to find lines matching a term, pattern, heading, flag, or any
-   literal string (e.g. "find lines containing AOF", "show all headings"), use
-   argrep_search.
-
-4. If the user asks a conceptual question — how something works, what something
-   means, differences between features — use vector_search. Answer directly from
-   those results. Do NOT then call fetch_lines as a follow-up.
-
 Never answer positional or structural questions from general knowledge or memory —
 always retrieve the actual content with a tool. Do not mention tool names or
 implementation details in your answers.
+
+When you use vector_search, answer directly from those results. The vector results
+are self-contained and sufficient — no follow-up tools are needed.
 """
 
 
@@ -532,7 +517,6 @@ def run_turn(executor: AgentExecutor, user_message: str) -> TurnResult:
     tool_reasoning = ""
     tool_commands: list[str] = []
     fetch_lines_collected: list[tuple[int, int]] = []
-
     # Agentic loop: invoke → execute tool calls → feed tool results → repeat
     while True:
         response = executor.client.chat.completions.create(
@@ -628,14 +612,20 @@ def run_turn(executor: AgentExecutor, user_message: str) -> TurnResult:
                 "content": observation,
             })
 
-    if fetch_lines_collected and not tool_reasoning:
-        parts = [str(s) if s == e else f"{s}–{e}" for s, e in fetch_lines_collected]
-        if len(parts) == 1:
-            tool_reasoning = f"Fetching line {parts[0]} by position."
-        elif len(parts) == 2:
-            tool_reasoning = f"Fetching lines {parts[0]} and {parts[1]} by position."
-        else:
-            tool_reasoning = f"Fetching lines {', '.join(parts[:-1])}, and {parts[-1]} by position."
+    if fetch_lines_collected:
+        # Override reasoning with the fetch description unless a search tool
+        # (argrep_search or vector_search) already set a more specific reason.
+        # This prevents count_lines' "Counting total lines…" from leaking through
+        # when count was only used as a lookup step before the real ARGET/ARGETRANGE.
+        has_search_tool = any(n in ("argrep_search", "vector_search") for n in tool_names_used)
+        if not has_search_tool or not tool_reasoning:
+            parts = [str(s) if s == e else f"{s}–{e}" for s, e in fetch_lines_collected]
+            if len(parts) == 1:
+                tool_reasoning = f"Fetching line {parts[0]} by position."
+            elif len(parts) == 2:
+                tool_reasoning = f"Fetching lines {parts[0]} and {parts[1]} by position."
+            else:
+                tool_reasoning = f"Fetching lines {', '.join(parts[:-1])}, and {parts[-1]} by position."
 
     assistant_message = choice.message.content or ""
     tool_used = _classify_tools(tool_names_used)
@@ -719,6 +709,8 @@ def _classify_tools(names: list[str]) -> str:
     has_arlen = "count_lines"   in names
     if (has_grep or has_fetch) and has_vec:
         return "both"
+    if has_grep and has_fetch:
+        return "grep_fetch"
     if has_grep:
         return "grep"
     if has_fetch:

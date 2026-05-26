@@ -215,9 +215,13 @@ class TestClassifyTools:
     def test_unknown_tool_is_none(self):
         assert _classify_tools(["unknown_tool"]) == "none"
 
-    def test_grep_and_fetch_together_is_grep(self):
-        # Both are array tools — classify as grep (dominant)
-        assert _classify_tools(["argrep_search", "fetch_lines"]) == "grep"
+    def test_grep_and_fetch_together_is_grep_fetch(self):
+        assert _classify_tools(["argrep_search", "fetch_lines"]) == "grep_fetch"
+
+    def test_count_and_fetch_together_is_fetch(self):
+        # count_lines is used as a lookup step (e.g. "show me the last line") —
+        # the result should reflect the real action, which is fetch.
+        assert _classify_tools(["count_lines", "fetch_lines"]) == "fetch"
 
 
 # ---------------------------------------------------------------------------

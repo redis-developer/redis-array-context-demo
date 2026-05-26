@@ -89,7 +89,7 @@ class TestChat:
     def test_chat_tool_used_is_valid_value(self, client):
         resp = client.post("/api/chat", json={"message": "show me line 5"})
         assert resp.status_code == 200
-        assert resp.json()["tool_used"] in ("grep", "vector", "fetch", "both", "none")
+        assert resp.json()["tool_used"] in ("grep", "fetch", "grep_fetch", "arlen", "vector", "both", "none")
 
     def test_chat_grep_results_have_line_and_content(self, client):
         resp = client.post("/api/chat", json={"message": "find all headings"})

@@ -51,7 +51,8 @@ function renderTool(toolUsed, toolReasoning, toolCommands, grepLatency, vecLaten
   if (toolUsed === "both") {
     bothLabel = hasGrep ? "Grep + Vector" : `${fetchLabel} + Vector`;
   }
-  const toolLabel = { grep: "Array Grep", vector: "Vector Search", fetch: fetchLabel, both: bothLabel, arlen: "Array Len" }[toolUsed] || toolUsed;
+  const grepFetchLabel = `Array Grep + ${fetchLabel}`;
+  const toolLabel = { grep: "Array Grep", vector: "Vector Search", fetch: fetchLabel, both: bothLabel, grep_fetch: grepFetchLabel, arlen: "Array Len" }[toolUsed] || toolUsed;
 
   // Plain text rows
   const rows = [`Tool: ${toolLabel}`];
@@ -120,10 +121,6 @@ function renderGrepResults(results, latency, toolUsed, toolCommands) {
   }
 
   els.grepList.classList.add("grep-active");
-  // Only show per-row latency when rows came from different commands
-  // (i.e. more than one distinct latency value).
-  const distinctLatencies = new Set(results.map(r => r.latency_ms));
-  const showRowLatency = distinctLatencies.size > 1;
 
   for (const r of results) {
     const li = document.createElement("li");
@@ -134,12 +131,6 @@ function renderGrepResults(results, latency, toolUsed, toolCommands) {
     text.className = "row-text";
     text.textContent = truncate(r.content);
     li.append(lineNum, text);
-    if (showRowLatency && r.latency_ms != null) {
-      const lat = document.createElement("span");
-      lat.className = "row-latency";
-      lat.textContent = formatLatency(r.latency_ms);
-      li.append(lat);
-    }
     els.grepList.append(li);
   }
 }
