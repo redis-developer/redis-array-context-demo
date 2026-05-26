@@ -315,17 +315,32 @@ redis-array-context-demo/
 
 ### Running the Tests
 
-The test suite requires no external services — no Redis connection, no OpenAI key. All Redis and LLM calls are mocked.
+The unit tests require no external services — no Redis connection, no OpenAI key. All Redis and LLM calls are mocked.
 
 ```sh
-python -m pytest tests/ -v
+python -m pytest -m "not integration" -v
 ```
 
-The tests are organized into three files:
+The unit tests are organized into three files:
 
 - `test_agent.py` — unit tests for key helpers, pattern detection, observation parsers, and all four tool functions with a mocked Redis client.
 - `test_api.py` — FastAPI endpoint tests via `TestClient` with Redis and the agent mocked out.
 - `test_cli.py` — CLI command tests via Typer's `CliRunner`, covering all four commands, error paths, and the global `--redis-url` option.
+
+### Integration Tests
+
+The integration tests spin up a real `redis:8.8-rc1` container via [Testcontainers](https://testcontainers.com/) and exercise the Array commands (ARGET, ARGETRANGE, ARGREP, ARLEN) against actual Redis behaviour. Docker must be running.
+
+```sh
+pip install -e ".[test]"
+pytest -m integration -v
+```
+
+A single container is shared across all 29 integration tests (session scope). Each test flushes the database on teardown so state never leaks between tests. To run the full suite — unit and integration — together:
+
+```sh
+pytest -v
+```
 
 ## Known Issues
 
