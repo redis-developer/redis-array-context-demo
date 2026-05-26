@@ -113,49 +113,6 @@ The right panel refreshes after every turn with three sections:
 
 Latency is shown at sub-millisecond precision (`µs` for fast commands, `ms` otherwise). When a tool was not used in a turn, its panel shows a dimmed "Not used this turn." state.
 
-### Suggested Demo Flow
-
-1. Start the demo with `docker compose up --build`.
-2. Ask "How many lines does the document have?" — shows `ARLEN` and sub-millisecond latency.
-3. Ask "Show me line 5." — shows `ARGET` with the exact line content.
-4. Ask "Show me lines 3 to 9." — shows `ARGETRANGE` with the full range.
-5. Ask "Find all the headings." — shows `ARGREP` with glob pattern and matched lines.
-6. Ask "How does AOF persistence work?" — shows `FT.SEARCH` and top-k semantic results.
-7. Ask "Find lines containing AOF, then explain how it works." — shows both tools in one turn.
-8. Inspect the keyspace in Redis Insight to see the Array key and vector index side by side.
-
-### Backend API
-
-| Method | Path | Purpose |
-|:-------|:-----|:--------|
-| `GET` | `/api/health` | Liveness check. |
-| `GET` | `/api/ready` | Readiness check — verifies Redis connection, Array key, and vector index. |
-| `POST` | `/api/chat` | Run one agent turn. |
-
-#### `POST /api/chat`
-
-**Request:**
-```json
-{ "message": "Show me lines 3 to 9." }
-```
-
-**Response:**
-```json
-{
-  "user_message": "Find all lines containing AOF.",
-  "assistant_message": "There are 8 lines mentioning AOF...",
-  "tool_used": "grep",
-  "tool_reasoning": "Pattern search for: AOF",
-  "tool_commands": ["ARGREP web:docs:redis-persistence 0 … GLOB *AOF* WITHVALUES"],
-  "grep_results": [
-    { "line": 12, "content": "AOF (Append Only File) logs every write.", "latency_ms": 0.241 }
-  ],
-  "grep_latency_ms": 0.241,
-  "vector_results": [],
-  "vector_latency_ms": null
-}
-```
-
 ### CLI
 
 The CLI lets you load documents and run Array and vector operations directly from the terminal. It uses the same backend agent and tools as the web app. The CLI requires a running Redis instance. If you are not running the full web app, start only the database container:
@@ -230,6 +187,49 @@ The `--redis-url` flag must be placed before the subcommand:
 
 ```sh
 python -m cli.main --redis-url redis://myhost:6379 chat --file docs/redis-persistence.md
+```
+
+#### Suggested Demo Flow
+
+1. Start the demo with `docker compose up --build`.
+2. Ask "How many lines does the document have?" — shows `ARLEN` and sub-millisecond latency.
+3. Ask "Show me line 5." — shows `ARGET` with the exact line content.
+4. Ask "Show me lines 3 to 9." — shows `ARGETRANGE` with the full range.
+5. Ask "Find all the headings." — shows `ARGREP` with glob pattern and matched lines.
+6. Ask "How does AOF persistence work?" — shows `FT.SEARCH` and top-k semantic results.
+7. Ask "Find lines containing AOF, then explain how it works." — shows both tools in one turn.
+8. Inspect the keyspace in Redis Insight to see the Array key and vector index side by side.
+
+#### Debugging theBackend API
+
+| Method | Path | Purpose |
+|:-------|:-----|:--------|
+| `GET` | `/api/health` | Liveness check. |
+| `GET` | `/api/ready` | Readiness check — verifies Redis connection, Array key, and vector index. |
+| `POST` | `/api/chat` | Run one agent turn. |
+
+#### `POST /api/chat`
+
+**Request:**
+```json
+{ "message": "Show me lines 3 to 9." }
+```
+
+**Response:**
+```json
+{
+  "user_message": "Find all lines containing AOF.",
+  "assistant_message": "There are 8 lines mentioning AOF...",
+  "tool_used": "grep",
+  "tool_reasoning": "Pattern search for: AOF",
+  "tool_commands": ["ARGREP web:docs:redis-persistence 0 … GLOB *AOF* WITHVALUES"],
+  "grep_results": [
+    { "line": 12, "content": "AOF (Append Only File) logs every write.", "latency_ms": 0.241 }
+  ],
+  "grep_latency_ms": 0.241,
+  "vector_results": [],
+  "vector_latency_ms": null
+}
 ```
 
 ## Architecture
