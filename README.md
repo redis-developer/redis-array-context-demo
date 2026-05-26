@@ -11,9 +11,19 @@ The demo runs as a web app and a CLI. You load a Markdown document into a Redis 
 - [Demo Objectives](#demo-objectives)
 - [Setup](#setup)
 - [Running the Demo](#running-the-demo)
-- [CLI](#cli)
+  - [How the Agent Decides](#how-the-agent-decides)
+  - [Pattern Matching](#pattern-matching)
+  - [Web UI](#web-ui)
+  - [CLI](#cli)
+    - [Commands](#commands)
+    - [Global --redis-url option](#global---redis-url-option)
+  - [Suggested Demo Flow](#suggested-demo-flow)
+  - [Debugging the Backend API](#debugging-the-backend-api)
 - [Architecture](#architecture)
-- [Running the Tests](#running-the-tests)
+  - [Redis Key Scheme](#redis-key-scheme)
+  - [Ingestion Pipeline](#ingestion-pipeline)
+  - [Project Structure](#project-structure)
+  - [Running the Tests](#running-the-tests)
 - [Known Issues](#known-issues)
 - [Resources](#resources)
 - [Maintainers](#maintainers)
@@ -189,7 +199,7 @@ The `--redis-url` flag must be placed before the subcommand:
 python -m cli.main --redis-url redis://myhost:6379 chat --file docs/redis-persistence.md
 ```
 
-#### Suggested Demo Flow
+### Suggested Demo Flow
 
 1. Start the demo with `docker compose up --build`.
 2. Ask "How many lines does the document have?" — shows `ARLEN` and sub-millisecond latency.
@@ -200,7 +210,7 @@ python -m cli.main --redis-url redis://myhost:6379 chat --file docs/redis-persis
 7. Ask "Find lines containing AOF, then explain how it works." — shows both tools in one turn.
 8. Inspect the keyspace in Redis Insight to see the Array key and vector index side by side.
 
-#### Debugging theBackend API
+### Debugging the Backend API
 
 | Method | Path | Purpose |
 |:-------|:-----|:--------|
@@ -212,23 +222,29 @@ python -m cli.main --redis-url redis://myhost:6379 chat --file docs/redis-persis
 
 **Request:**
 ```json
-{ "message": "Show me lines 3 to 9." }
+{ "message": "Show me the third line." }
 ```
 
 **Response:**
 ```json
 {
-  "user_message": "Find all lines containing AOF.",
-  "assistant_message": "There are 8 lines mentioning AOF...",
-  "tool_used": "grep",
-  "tool_reasoning": "Pattern search for: AOF",
-  "tool_commands": ["ARGREP web:docs:redis-persistence 0 … GLOB *AOF* WITHVALUES"],
-  "grep_results": [
-    { "line": 12, "content": "AOF (Append Only File) logs every write.", "latency_ms": 0.241 }
-  ],
-  "grep_latency_ms": 0.241,
-  "vector_results": [],
-  "vector_latency_ms": null
+    "user_message": "Show me the third line.",
+    "assistant_message": "The third line is: \"How Redis writes data to disk\"",
+    "tool_used": "fetch",
+    "tool_reasoning": "Fetching line 3 by position.",
+    "tool_commands": [
+        "ARGET web:docs:redis-persistence 2"
+    ],
+    "grep_results": [
+        {
+            "line": 3,
+            "content": "How Redis writes data to disk",
+            "latency_ms": 0.396
+        }
+    ],
+    "grep_latency_ms": 0.396,
+    "vector_results": [],
+    "vector_latency_ms": null
 }
 ```
 
