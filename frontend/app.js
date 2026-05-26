@@ -195,8 +195,8 @@ async function sendMessage(message) {
       body: JSON.stringify({ message }),
     });
     appendMessage("ai", "🤖 Agent", payload.assistant_message);
-    renderTool(payload.tool_used, payload.tool_reasoning, payload.tool_commands, payload.grep_latency_ms, payload.vector_latency_ms);
-    renderGrepResults(payload.grep_results, payload.grep_latency_ms, payload.tool_used, payload.tool_commands);
+    renderTool(payload.tool_used, payload.tool_reasoning, payload.tool_commands, payload.total_latency_ms, payload.vector_latency_ms);
+    renderGrepResults(payload.grep_results, payload.total_latency_ms, payload.tool_used, payload.tool_commands);
     renderVectorResults(payload.vector_results, payload.vector_latency_ms);
   } catch (error) {
     appendMessage("system", "Error", error.message);

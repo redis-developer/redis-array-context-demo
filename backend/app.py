@@ -105,7 +105,7 @@ class ChatResponse(BaseModel):
     tool_reasoning: str
     tool_commands: list[str]
     grep_results: list[GrepResult]
-    grep_latency_ms: float | None
+    total_latency_ms: float | None
     vector_results: list[VectorResult]
     vector_latency_ms: float | None
 
@@ -164,7 +164,7 @@ def chat(request: ChatRequest) -> ChatResponse:
         tool_reasoning=result.tool_reasoning,
         tool_commands=result.tool_commands,
         grep_results=[GrepResult(**r) for r in result.grep_results],
-        grep_latency_ms=result.grep_latency_ms,
+        total_latency_ms=result.total_latency_ms,
         vector_results=[VectorResult(**r) for r in result.vector_results],
         vector_latency_ms=result.vector_latency_ms,
     )

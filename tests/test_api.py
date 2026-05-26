@@ -15,7 +15,7 @@ def _make_turn_result(**kwargs) -> TurnResult:
         tool_used="grep",
         tool_reasoning="Exact search for a specific term.",
         grep_results=[{"line": 10, "content": "## Test Heading"}],
-        grep_latency_ms=3,
+        total_latency_ms=3,
         vector_results=[],
         vector_latency_ms=None,
     )
@@ -83,7 +83,7 @@ class TestChat:
         assert "tool_reasoning" in data
         assert "grep_results" in data
         assert "vector_results" in data
-        assert "grep_latency_ms" in data
+        assert "total_latency_ms" in data
         assert "vector_latency_ms" in data
 
     def test_chat_tool_used_is_valid_value(self, client):

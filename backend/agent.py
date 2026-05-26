@@ -200,7 +200,7 @@ class TurnResult:
     tool_reasoning: str
     tool_commands: list[str] = field(default_factory=list)  # Redis commands executed
     grep_results: list[dict[str, Any]] = field(default_factory=list)
-    grep_latency_ms: float | None = None
+    total_latency_ms: float | None = None
     vector_results: list[dict[str, Any]] = field(default_factory=list)
     vector_latency_ms: float | None = None
 
@@ -525,7 +525,7 @@ def run_turn(executor: AgentExecutor, user_message: str) -> TurnResult:
     ]
 
     grep_results: list[dict] = []
-    grep_latency_ms: float | None = None
+    total_latency_ms: float | None = None
     vector_results: list[dict] = []
     vector_latency_ms: float | None = None
     tool_names_used: list[str] = []
@@ -583,7 +583,7 @@ def run_turn(executor: AgentExecutor, user_message: str) -> TurnResult:
                 for r in call_results:
                     r["latency_ms"] = latency
                 grep_results.extend(call_results)
-                grep_latency_ms = (grep_latency_ms or 0) + (latency or 0)
+                total_latency_ms = (total_latency_ms or 0) + (latency or 0)
                 if not tool_reasoning:
                     tool_reasoning = f"Pattern search for: {pattern}"
                 tool_commands.append(
@@ -608,7 +608,7 @@ def run_turn(executor: AgentExecutor, user_message: str) -> TurnResult:
                 for r in call_results:
                     r["latency_ms"] = latency
                 grep_results.extend(call_results)
-                grep_latency_ms = (grep_latency_ms or 0) + (latency or 0)
+                total_latency_ms = (total_latency_ms or 0) + (latency or 0)
                 fetch_lines_collected.append((start, end))
                 s_idx, e_idx = start - 1, end - 1
                 if s_idx == e_idx:
@@ -617,7 +617,7 @@ def run_turn(executor: AgentExecutor, user_message: str) -> TurnResult:
                     tool_commands.append(f"ARGETRANGE {executor.array_key} {s_idx} {e_idx}")
 
             elif tool_name == "count_lines":
-                grep_latency_ms = (grep_latency_ms or 0) + (latency or 0)
+                total_latency_ms = (total_latency_ms or 0) + (latency or 0)
                 if not tool_reasoning:
                     tool_reasoning = "Counting total lines in the document."
                 tool_commands.append(f"ARLEN {executor.array_key}")
@@ -647,7 +647,7 @@ def run_turn(executor: AgentExecutor, user_message: str) -> TurnResult:
         tool_reasoning=tool_reasoning,
         tool_commands=tool_commands,
         grep_results=grep_results,
-        grep_latency_ms=grep_latency_ms,
+        total_latency_ms=total_latency_ms,
         vector_results=vector_results,
         vector_latency_ms=vector_latency_ms,
     )

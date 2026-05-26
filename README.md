@@ -19,6 +19,7 @@ The demo runs as a web app and a CLI. You load a Markdown document into a Redis 
     - [Global --redis-url option](#global---redis-url-option)
   - [Suggested Demo Flow](#suggested-demo-flow)
   - [Debugging the Backend API](#debugging-the-backend-api)
+    - [POST /api/chat](#post-apichat)
 - [Architecture](#architecture)
   - [Redis Key Scheme](#redis-key-scheme)
   - [Ingestion Pipeline](#ingestion-pipeline)
@@ -242,7 +243,7 @@ python -m cli.main --redis-url redis://myhost:6379 chat --file docs/redis-persis
             "latency_ms": 0.396
         }
     ],
-    "grep_latency_ms": 0.396,
+    "total_latency_ms": 0.396,
     "vector_results": [],
     "vector_latency_ms": null
 }

@@ -251,7 +251,7 @@ class TestChatCommand:
             tool_reasoning="Pattern search for: AOF",
             tool_commands=["ARGREP web:docs:test 0 … GLOB *AOF* WITHVALUES"],
             grep_results=[{"line": 5, "content": "AOF content"}],
-            grep_latency_ms=0.312,
+            total_latency_ms=0.312,
             vector_results=[],
             vector_latency_ms=None,
         )
@@ -297,7 +297,7 @@ class TestChatCommand:
         assert "ARGREP" in result.output
 
     def test_chat_shows_latency(self):
-        turn = self._make_turn_result(grep_latency_ms=0.312)
+        turn = self._make_turn_result(total_latency_ms=0.312)
         with (
             patch("cli.main.load_config", return_value=_mock_config()),
             patch("cli.main.get_redis_client", return_value=_mock_redis()),
@@ -310,7 +310,7 @@ class TestChatCommand:
         assert "µs" in result.output or "ms" in result.output
 
     def test_chat_arlen_tool_label(self):
-        turn = self._make_turn_result(tool_used="arlen", grep_latency_ms=0.18,
+        turn = self._make_turn_result(tool_used="arlen", total_latency_ms=0.18,
                                       tool_commands=["ARLEN web:docs:test"])
         with (
             patch("cli.main.load_config", return_value=_mock_config()),
@@ -326,7 +326,7 @@ class TestChatCommand:
     def test_chat_vector_tool_shows_vector_latency(self):
         turn = self._make_turn_result(
             tool_used="vector",
-            grep_latency_ms=None,
+            total_latency_ms=None,
             vector_latency_ms=1.9,
             grep_results=[],
             tool_commands=['FT.SEARCH web:idx:test "*=>[KNN 5 @embedding $vec]"'],
@@ -356,7 +356,7 @@ class TestChatCommand:
         turn = self._make_turn_result(
             tool_used="none",
             grep_results=[],
-            grep_latency_ms=None,
+            total_latency_ms=None,
             tool_commands=[],
             tool_reasoning="",
         )

@@ -287,8 +287,8 @@ def chat(
 
         if result.tool_used != "none":
             parts = [f"[bold cyan]Tool:[/bold cyan] {tool_label}"]
-            if result.grep_latency_ms is not None:
-                parts.append(f"array {_fmt_latency(result.grep_latency_ms)}")
+            if result.total_latency_ms is not None:
+                parts.append(f"array {_fmt_latency(result.total_latency_ms)}")
             if result.vector_latency_ms is not None:
                 parts.append(f"vector {_fmt_latency(result.vector_latency_ms)}")
             console.print("  " + "  ·  ".join(parts))
