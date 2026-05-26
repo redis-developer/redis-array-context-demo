@@ -10,6 +10,7 @@ from redisvl.utils.vectorize import OpenAITextVectorizer
 from pydantic import BaseModel, Field
 
 from .agent import (
+    AgentExecutor,
     DemoConfig,
     TurnResult,
     build_executor,
@@ -31,11 +32,12 @@ logger = logging.getLogger("uvicorn.error")
 _config: DemoConfig | None = None
 _array_key: str | None = None
 _index_name: str | None = None
+_executor: AgentExecutor | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _config, _array_key, _index_name
+    global _config, _array_key, _index_name, _executor
 
     _config = load_config()
     redis_client = get_redis_client(_config.redis_url)
@@ -49,6 +51,8 @@ async def lifespan(app: FastAPI):
         vectorizer,
         _config.markdown_file,
     )
+
+    _executor = build_executor(_config, redis_client, _array_key, _index_name)
 
     logger.info(
         "Startup complete. Array key: %s  Vector index: %s",
@@ -144,14 +148,11 @@ def ready() -> ReadinessResponse:
 
 @app.post("/api/chat", response_model=ChatResponse)
 def chat(request: ChatRequest) -> ChatResponse:
-    if _config is None or _array_key is None or _index_name is None:
+    if _executor is None:
         raise HTTPException(status_code=503, detail="Server is still starting up.")
 
-    redis_client = get_redis_client(_config.redis_url)
-    executor = build_executor(_config, redis_client, _array_key, _index_name)
-
     try:
-        result: TurnResult = run_turn(executor, request.message.strip())
+        result: TurnResult = run_turn(_executor, request.message.strip())
     except Exception as exc:
         logger.exception("Agent turn failed")
         raise HTTPException(status_code=502, detail=str(exc)) from exc

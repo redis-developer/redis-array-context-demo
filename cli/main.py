@@ -52,19 +52,7 @@ def _global(
 def _get_clients():
     config = load_config()
     redis_client = get_redis_client(_redis_url)
-    vectorizer = OpenAITextVectorizer(
-        model="text-embedding-3-small",
-        api_config={"api_key": config.openai_api_key},
-    )
-    return config, redis_client, vectorizer
-
-
-def _resolve_key(key_name: str | None, filepath: str, prefix: str = CLI_PREFIX) -> str:
-    return key_name if key_name else docs_key(filepath, prefix)
-
-
-def _resolve_index(key_name: str | None, filepath: str, prefix: str = CLI_PREFIX) -> str:
-    return key_name if key_name else idx_key(filepath, prefix)
+    return config, redis_client
 
 
 def _fmt_latency(ms: float) -> str:
@@ -92,9 +80,13 @@ def load(
 
     Uses the 'cli:' key prefix to keep CLI data separate from the web app.
     """
-    config, redis_client, vectorizer = _get_clients()
+    config, redis_client = _get_clients()
+    vectorizer = OpenAITextVectorizer(
+        model="text-embedding-3-small",
+        api_config={"api_key": config.openai_api_key},
+    )
     path_str = str(filepath)
-    array_key = _resolve_key(key_name, path_str)
+    array_key = key_name if key_name else docs_key(path_str, CLI_PREFIX)
 
     if force and redis_client.exists(array_key):
         redis_client.delete(array_key)
@@ -132,13 +124,13 @@ def grep(
     Supports exact match, glob wildcards (e.g. '## *'), and regex patterns.
     Returns matching lines with their line numbers.
     """
-    config, redis_client, _ = _get_clients()
+    _, redis_client = _get_clients()
 
     if not filepath and not key_name:
         console.print("[red]Provide --file or --key-name.[/red]")
         raise typer.Exit(1)
 
-    array_key = _resolve_key(key_name, str(filepath) if filepath else "")
+    array_key = key_name if key_name else docs_key(str(filepath), CLI_PREFIX)
 
     try:
         # Pre-warm: get array length (needed for the range arg, excludes connection cost from timer).
@@ -191,13 +183,17 @@ def search(
     from redisvl.index import SearchIndex
     from redisvl.query import VectorQuery
 
-    config, redis_client, vectorizer = _get_clients()
+    config, redis_client = _get_clients()
+    vectorizer = OpenAITextVectorizer(
+        model="text-embedding-3-small",
+        api_config={"api_key": config.openai_api_key},
+    )
 
     if not filepath and not key_name:
         console.print("[red]Provide --file or --key-name.[/red]")
         raise typer.Exit(1)
 
-    index_name = _resolve_index(key_name, str(filepath) if filepath else "")
+    index_name = key_name if key_name else idx_key(str(filepath), CLI_PREFIX)
 
     try:
         # Embedding and index setup happen outside the timer — same as backend.
@@ -248,14 +244,14 @@ def chat(
     Uses the same agent, tools, and timing logic as the web app.
     Each response shows which tool was invoked and the Redis round-trip latency.
     """
-    config, redis_client, _ = _get_clients()
+    config, redis_client = _get_clients()
 
     if not filepath and not key_name:
         console.print("[red]Provide --file or --key-name.[/red]")
         raise typer.Exit(1)
 
-    array_key = _resolve_key(key_name, str(filepath) if filepath else "")
-    index_name = _resolve_index(key_name, str(filepath) if filepath else "")
+    array_key = key_name if key_name else docs_key(str(filepath), CLI_PREFIX)
+    index_name = key_name if key_name else idx_key(str(filepath), CLI_PREFIX)
 
     executor = build_executor(config, redis_client, array_key, index_name)
 

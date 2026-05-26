@@ -10,7 +10,6 @@ from backend.agent import (
     _classify_tools,
     _detect_match_type,
     _effective_argrep_pattern,
-    _parse_fetch_observation,
     _parse_grep_observation,
     _parse_latency,
     _parse_vector_observation,
@@ -167,19 +166,6 @@ class TestParseGrepObservation:
         obs = "Matched 1 line(s) (latency: 1ms):\nL7: some content   "
         results = _parse_grep_observation(obs)
         assert results[0]["content"] == "some content"
-
-
-class TestParseFetchObservation:
-    def test_delegates_to_grep_parser(self):
-        obs = "Lines 3–5 (latency: 1ms):\nL3: foo\nL4: bar\nL5: baz"
-        results = _parse_fetch_observation(obs, start_hint=3)
-        assert len(results) == 3
-        assert results[0] == {"line": 3, "content": "foo"}
-
-    def test_single_line_fetch(self):
-        obs = "Lines 7–7 (latency: 0.3ms):\nL7: single line"
-        results = _parse_fetch_observation(obs, start_hint=7)
-        assert results == [{"line": 7, "content": "single line"}]
 
 
 class TestParseVectorObservation:

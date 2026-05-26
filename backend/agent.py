@@ -193,14 +193,6 @@ def document_ready(
 # ---------------------------------------------------------------------------
 
 @dataclass
-class ToolTrace:
-    tool_name: str
-    query: str
-    results: list[dict[str, Any]]
-    latency_ms: int
-
-
-@dataclass
 class TurnResult:
     user_message: str
     assistant_message: str
@@ -607,7 +599,7 @@ def run_turn(executor: AgentExecutor, user_message: str) -> TurnResult:
             elif tool_name == "fetch_lines":
                 start = tool_args.get("start_line", 1)
                 end = tool_args.get("end_line", 1)
-                call_results = _parse_fetch_observation(observation, start)
+                call_results = _parse_grep_observation(observation)
                 for r in call_results:
                     r["latency_ms"] = latency
                 grep_results.extend(call_results)
@@ -672,10 +664,6 @@ def _parse_grep_observation(observation: str) -> list[dict]:
     for m in re.finditer(r"L(\d+):[ \t]*(.*)", observation):
         results.append({"line": int(m.group(1)), "content": m.group(2).strip()})
     return results
-
-
-def _parse_fetch_observation(observation: str, start_hint: Any) -> list[dict]:
-    return _parse_grep_observation(observation)
 
 
 def _parse_vector_observation(observation: str) -> list[dict]:
