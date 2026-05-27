@@ -344,7 +344,7 @@ pytest -v
 
 ## Known Issues
 
-- The Redis 8.8 Array commands (ARGREP, ARGET, ARGETRANGE, ARLEN, ARINSERT) require Redis 8.8-rc1 or later. The Docker Compose file pins the image to `redis:8.8-rc1`.
+- The Redis 8.8 Array commands (ARGREP, ARGET, ARGETRANGE, ARLEN, ARINSERT) require Redis 8.8 or later. The Docker Compose file pins the image to `redis:8.8`.
 - Rebuilding the frontend container is required whenever `frontend/` files change: `docker compose up --build frontend`. Changes to `frontend/` are baked into the Nginx image at build time.
 - The CLI connects to `redis://localhost:6379` by default, which goes through Docker's port mapping and adds a small amount of network overhead compared to the web backend's container-to-container connection.
 - Vector search quality depends on the embedding model and the content of the document. Code fences and other structural markdown noise are excluded from the index at ingestion time.
