@@ -2,9 +2,9 @@
 
 ## Overview
 
-This demo showcases the [Redis Array](https://redis.io/docs/latest/develop/data-types/arrays) data type introduced in Redis 8.8 as a context retrieval layer for AI agents. Built with Python, FastAPI, OpenAI, and RedisVL, it demonstrates how Redis Arrays give agents a native way to store and retrieve text where line position and exactness matter, complementing rather than replacing semantic vector search.
+This demo showcases the [Redis array](https://redis.io/docs/latest/develop/data-types/arrays) data type introduced in Redis 8.8 as a context retrieval layer for AI agents. Built with Python, FastAPI, OpenAI, and RedisVL, it demonstrates how arrays give agents a native way to store and retrieve text where line position and exactness matter, complementing rather than replacing semantic vector search.
 
-The demo runs as a web app and a CLI. You load a Markdown document into a Redis Array, then ask questions through a chat interface. The agent decides at runtime whether to use exact Array operations (`ARGREP`, `ARGET`, `ARGETRANGE`, `ARLEN`) or vector similarity search (`FT.SEARCH`). The right panel shows full observability of which path was taken, the exact Redis command executed, and the latency of the Redis round trip.
+The demo runs as a web app and a CLI. You load a Markdown document into a Redis array, then ask questions through a chat interface. The agent decides at runtime whether to use exact array operations (`ARGREP`, `ARGET`, `ARGETRANGE`, `ARLEN`) or vector similarity search (`FT.SEARCH`). The right panel shows full observability of which path was taken, the exact Redis command executed, and the latency of the Redis round trip.
 
 ## Table of Contents
 
@@ -344,7 +344,7 @@ pytest -v
 
 ## Known Issues
 
-- The Redis 8.8 Array commands (ARGREP, ARGET, ARGETRANGE, ARLEN, ARINSERT) require Redis 8.8 or later. The Docker Compose file pins the image to `redis:8.8`.
+- The array commands (ARGREP, ARGET, ARGETRANGE, ARLEN, ARINSERT) require Redis 8.8 or later. The Docker Compose file pins the image to `redis:8.8`.
 - Rebuilding the frontend container is required whenever `frontend/` files change: `docker compose up --build frontend`. Changes to `frontend/` are baked into the Nginx image at build time.
 - The CLI connects to `redis://localhost:6379` by default, which goes through Docker's port mapping and adds a small amount of network overhead compared to the web backend's container-to-container connection.
 - Vector search quality depends on the embedding model and the content of the document. Code fences and other structural markdown noise are excluded from the index at ingestion time.
