@@ -2,7 +2,7 @@
 
 ## Overview
 
-This demo showcases the **Redis Array** data type introduced in Redis 8.8 as a context retrieval layer for AI agents. Built with Python, FastAPI, OpenAI, and RedisVL, it demonstrates how Redis Arrays give agents a native way to store and retrieve text where line position and exactness matter, complementing rather than replacing semantic vector search.
+This demo showcases the [Redis Array](https://redis.io/docs/latest/develop/data-types/arrays) data type introduced in Redis 8.8 as a context retrieval layer for AI agents. Built with Python, FastAPI, OpenAI, and RedisVL, it demonstrates how Redis Arrays give agents a native way to store and retrieve text where line position and exactness matter, complementing rather than replacing semantic vector search.
 
 The demo runs as a web app and a CLI. You load a Markdown document into a Redis Array, then ask questions through a chat interface. The agent decides at runtime whether to use exact Array operations (`ARGREP`, `ARGET`, `ARGETRANGE`, `ARLEN`) or vector similarity search (`FT.SEARCH`). The right panel shows full observability of which path was taken, the exact Redis command executed, and the latency of the Redis round trip.
 
