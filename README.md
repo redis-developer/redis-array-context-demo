@@ -351,7 +351,7 @@ pytest -v
 
 ## Resources
 
-- [Redis 8.8 release notes](https://redis.io/blog/)
+- [Redis 8.8 release notes](https://github.com/redis/redis/releases/tag/8.8.0)
 - [RedisVL documentation](https://docs.redisvl.com/en/latest/)
 - [OpenAI function-calling documentation](https://platform.openai.com/docs/guides/function-calling)
 - [OpenAI API documentation](https://platform.openai.com/docs)
