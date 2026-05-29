@@ -100,7 +100,7 @@ The agent receives the user's natural language question and applies a set of rul
 | "Show me line 43." | `fetch_lines` | `ARGET` |
 | "Show me lines 40 to 50." | `fetch_lines` | `ARGETRANGE` |
 | "Find all the headings." | `argrep_search` | `ARGREP … GLOB ## *` |
-| "Show lines containing AOF." | `argrep_search` | `ARGREP … GLOB *AOF*` |
+| "Show lines containing AOF." | `argrep_search` | `ARGREP … MATCH AOF` |
 | "How does AOF persistence work?" | `vector_search` | `FT.SEARCH` |
 | "Explain the difference between RDB and AOF." | `vector_search` | `FT.SEARCH` |
 
@@ -108,7 +108,7 @@ The agent receives the user's natural language question and applies a set of rul
 
 The `argrep_search` tool automatically infers the match type from the pattern:
 
-- **Plain text** — wrapped in glob wildcards for a contains search: `AOF` → `GLOB *AOF*`
+- **Plain text** — passed through as a native substring search: `AOF` → `MATCH AOF`
 - **Glob** — passed through as-is: `## *`, `save ?`
 - **Regex** — passed through as-is: `^save `, `RDB|AOF`
 
@@ -132,13 +132,13 @@ The CLI lets you load documents and run Array and vector operations directly fro
 docker compose up -d redis-database
 ```
 
-Install dependencies using your virtualenv:
+Install dependencies using `uv`:
 
 ```sh
-pip install -e .
+uv sync
 ```
 
-Or activate the project virtualenv:
+Or activate the project virtualenv after syncing:
 
 ```sh
 source .venv/bin/activate
@@ -187,7 +187,7 @@ Each response shows the tool used, the Redis command issued, and the latency:
 ```
   Tool: Array Grep  ·  array 312µs
   Pattern search for: AOF
-  $ ARGREP cli:docs:redis-persistence 0 … GLOB *AOF* WITHVALUES
+  $ ARGREP cli:docs:redis-persistence 0 … MATCH AOF WITHVALUES
 
 Agent: There are 8 lines mentioning AOF...
 ```
@@ -255,7 +255,7 @@ One agent turn runs as follows:
 
 1. The user's message is passed to a tool-calling agent with four tools bound to it: `count_lines`, `fetch_lines`, `argrep_search`, and `vector_search`.
 2. The LLM selects a tool (or no tool) and returns a tool call.
-3. The selected tool issues a Redis command — ARLEN, ARGET, ARGETRANGE, ARGREP, or FT.SEARCH — and times only the Redis round-trip using `perf_counter_ns()`. A pre-warm `execute_command` call runs before the timer to ensure the connection pool returns a warm socket.
+3. The selected tool issues a Redis command — ARLEN, ARGET, ARGETRANGE, ARGREP, or FT.SEARCH — and times only the Redis round-trip using `perf_counter_ns()`. A pre-warm call using the native Redis client API runs before the timer to ensure the connection pool returns a warm socket.
 4. The tool result is fed back to the LLM as a `ToolMessage`. The LLM generates the final response.
 5. The backend parses the tool observations to extract results and latencies, and returns a structured `TurnResult` to the API layer.
 
@@ -301,9 +301,13 @@ redis-array-context-demo/
 ├── docs/               # Bundled sample Markdown document
 ├── tests/
 │   ├── conftest.py
-│   ├── test_agent.py   # Unit tests — parsers, tools, key helpers
-│   ├── test_api.py     # FastAPI endpoint tests
-│   └── test_cli.py     # CLI command tests via Typer CliRunner
+│   ├── test_agent.py        # Unit tests — parsers, tools, key helpers
+│   ├── test_api.py          # FastAPI endpoint tests
+│   ├── test_cli.py          # CLI command tests via Typer CliRunner
+│   └── integration/
+│       ├── conftest.py      # Testcontainers Redis 8.8 session fixture
+│       ├── test_ingest.py   # Ingestion pipeline integration tests
+│       └── test_tools.py    # Array tool integration tests (ARGET, ARGETRANGE, ARGREP, ARLEN)
 ├── data/               # Redis persistence volume (gitignored)
 ├── images/
 ├── .env.example
@@ -332,11 +336,11 @@ The unit tests are organized into three files:
 The integration tests spin up a real `redis:8.8.0` container via [Testcontainers](https://testcontainers.com/) and exercise the Array commands (ARGET, ARGETRANGE, ARGREP, ARLEN) against actual Redis behaviour. Docker must be running.
 
 ```sh
-pip install -e ".[test]"
+uv sync --extra test
 pytest -m integration -v
 ```
 
-A single container is shared across all 29 integration tests (session scope). Each test flushes the database on teardown so state never leaks between tests. To run the full suite — unit and integration — together:
+A single container is shared across all 29 integration tests (session scope). Each test flushes the database before and after it runs so state never leaks between tests. To run the full suite — unit and integration — together:
 
 ```sh
 pytest -v

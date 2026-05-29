@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
+from redis.commands.core import ArrayPredicateType
 
 from backend.agent import (
     CLI_PREFIX,
@@ -70,54 +71,54 @@ class TestIdxKey:
 # ---------------------------------------------------------------------------
 
 class TestDetectMatchType:
-    def test_plain_text_is_exact(self):
-        assert _detect_match_type("AOF") == "EXACT"
+    def test_plain_text_is_match(self):
+        assert _detect_match_type("AOF") == ArrayPredicateType.MATCH
 
     def test_glob_star(self):
-        assert _detect_match_type("## *") == "GLOB"
+        assert _detect_match_type("## *") == ArrayPredicateType.GLOB
 
     def test_glob_question_mark(self):
-        assert _detect_match_type("save ?") == "GLOB"
+        assert _detect_match_type("save ?") == ArrayPredicateType.GLOB
 
     def test_glob_brackets(self):
-        assert _detect_match_type("[rR]eplication") == "GLOB"
+        assert _detect_match_type("[rR]eplication") == ArrayPredicateType.GLOB
 
     def test_regex_caret(self):
-        assert _detect_match_type("^save ") == "RE"
+        assert _detect_match_type("^save ") == ArrayPredicateType.RE
 
     def test_regex_dollar(self):
-        assert _detect_match_type("yes$") == "RE"
+        assert _detect_match_type("yes$") == ArrayPredicateType.RE
 
     def test_regex_pipe(self):
-        assert _detect_match_type("RDB|AOF") == "RE"
+        assert _detect_match_type("RDB|AOF") == ArrayPredicateType.RE
 
     def test_regex_parens(self):
-        assert _detect_match_type("(rdb|aof)") == "RE"
+        assert _detect_match_type("(rdb|aof)") == ArrayPredicateType.RE
 
     def test_regex_plus(self):
-        assert _detect_match_type("save +") == "RE"
+        assert _detect_match_type("save +") == ArrayPredicateType.RE
 
 
 class TestEffectiveArGrepPattern:
-    def test_plain_text_wrapped_in_glob(self):
-        match_type, pattern = _effective_argrep_pattern("AOF")
-        assert match_type == "GLOB"
-        assert pattern == "*AOF*"
+    def test_plain_text_uses_match_type(self):
+        pred_type, pattern = _effective_argrep_pattern("AOF")
+        assert pred_type == ArrayPredicateType.MATCH
+        assert pattern == "AOF"
 
     def test_glob_pattern_passed_through(self):
-        match_type, pattern = _effective_argrep_pattern("## *")
-        assert match_type == "GLOB"
+        pred_type, pattern = _effective_argrep_pattern("## *")
+        assert pred_type == ArrayPredicateType.GLOB
         assert pattern == "## *"
 
     def test_regex_passed_through(self):
-        match_type, pattern = _effective_argrep_pattern("^save ")
-        assert match_type == "RE"
+        pred_type, pattern = _effective_argrep_pattern("^save ")
+        assert pred_type == ArrayPredicateType.RE
         assert pattern == "^save "
 
-    def test_plain_with_spaces_wrapped(self):
-        match_type, pattern = _effective_argrep_pattern("append only")
-        assert match_type == "GLOB"
-        assert pattern == "*append only*"
+    def test_plain_with_spaces_uses_match_type(self):
+        pred_type, pattern = _effective_argrep_pattern("append only")
+        assert pred_type == ArrayPredicateType.MATCH
+        assert pattern == "append only"
 
 
 # ---------------------------------------------------------------------------
@@ -243,43 +244,52 @@ def _make_vectorizer(vector=None):
     return v
 
 
+def _build_tools(redis_client, array_key="web:docs:test"):
+    """Call build_tools with SearchIndex construction patched out."""
+    from backend.agent import build_tools
+    with patch("backend.agent.SearchIndex") as mock_si:
+        mock_si.return_value = MagicMock()
+        return build_tools(redis_client, _make_vectorizer(), array_key, "web:idx:test")
+
+
 class TestFetchLinesTool:
     """Tests for the fetch_lines tool function via build_tools."""
 
     def _get_tool(self, redis_client, array_key="web:docs:test"):
-        from backend.agent import build_tools
-        return build_tools(redis_client, _make_vectorizer(), array_key, "web:idx:test")["fetch_lines"]
+        return _build_tools(redis_client, array_key)["fetch_lines"]
 
     def test_single_line_calls_arget(self):
         rc = _make_redis()
-        rc.execute_command.side_effect = [None, "line content"]  # EXISTS pre-warm, then ARGET
+        rc.arlen.return_value = 10   # pre-warm
+        rc.arget.return_value = "line content"
         tool = self._get_tool(rc)
         result = tool(start_line=5, end_line=5)
-        arget_call = rc.execute_command.call_args_list[-1]
-        assert arget_call == call("ARGET", "web:docs:test", 4)
+        rc.arget.assert_called_once_with("web:docs:test", 4)
         assert "L5: line content" in result
 
     def test_range_calls_argetrange(self):
         rc = _make_redis()
-        rc.execute_command.side_effect = [None, ["line3", "line4", "line5"]]
+        rc.arlen.return_value = 10   # pre-warm
+        rc.argetrange.return_value = ["line3", "line4", "line5"]
         tool = self._get_tool(rc)
         result = tool(start_line=3, end_line=5)
-        argetrange_call = rc.execute_command.call_args_list[-1]
-        assert argetrange_call == call("ARGETRANGE", "web:docs:test", 2, 4)
+        rc.argetrange.assert_called_once_with("web:docs:test", 2, 4)
         assert "L3: line3" in result
         assert "L4: line4" in result
         assert "L5: line5" in result
 
     def test_blank_lines_rendered_empty(self):
         rc = _make_redis()
-        rc.execute_command.side_effect = [None, ["content", None, "more content"]]
+        rc.arlen.return_value = 10
+        rc.argetrange.return_value = ["content", None, "more content"]
         tool = self._get_tool(rc)
         result = tool(start_line=1, end_line=3)
         assert "L2: \n" in result or result.count("L2:") == 1
 
     def test_includes_latency_in_observation(self):
         rc = _make_redis()
-        rc.execute_command.side_effect = [None, "hello"]
+        rc.arlen.return_value = 10
+        rc.arget.return_value = "hello"
         tool = self._get_tool(rc)
         result = tool(start_line=1, end_line=1)
         assert "latency:" in result
@@ -287,7 +297,7 @@ class TestFetchLinesTool:
 
     def test_redis_error_returns_error_string(self):
         rc = _make_redis()
-        rc.execute_command.side_effect = Exception("connection refused")
+        rc.arlen.side_effect = Exception("connection refused")
         tool = self._get_tool(rc)
         result = tool(start_line=1, end_line=1)
         assert "Error" in result
@@ -295,47 +305,50 @@ class TestFetchLinesTool:
     def test_one_based_to_zero_based_conversion(self):
         """Line 1 should map to index 0, line 10 to index 9."""
         rc = _make_redis()
-        rc.execute_command.side_effect = [None, "first line"]
+        rc.arlen.return_value = 10
+        rc.arget.return_value = "first line"
         tool = self._get_tool(rc)
         tool(start_line=1, end_line=1)
-        arget_call = rc.execute_command.call_args_list[-1]
-        assert arget_call.args[2] == 0  # 0-based index
+        rc.arget.assert_called_once_with("web:docs:test", 0)
 
 
 class TestArgrepSearchTool:
     def _get_tool(self, redis_client, array_key="web:docs:test"):
-        from backend.agent import build_tools
-        return build_tools(redis_client, _make_vectorizer(), array_key, "web:idx:test")["argrep_search"]
+        return _build_tools(redis_client, array_key)["argrep_search"]
 
-    def test_plain_text_wrapped_in_glob(self):
+    def test_plain_text_uses_match_predicate(self):
         rc = _make_redis()
-        rc.execute_command.side_effect = [5, []]  # ARLEN, ARGREP
+        rc.arlen.return_value = 5
+        rc.argrep.return_value = []
         tool = self._get_tool(rc)
         tool(pattern="AOF")
-        argrep_call = rc.execute_command.call_args_list[-1]
-        assert argrep_call.args[4] == "GLOB"
-        assert argrep_call.args[5] == "*AOF*"
+        predicates = rc.argrep.call_args[0][3]
+        assert predicates[0][0] == ArrayPredicateType.MATCH
+        assert predicates[0][1] == "AOF"
 
-    def test_glob_pattern_passed_through(self):
+    def test_glob_pattern_uses_glob_predicate(self):
         rc = _make_redis()
-        rc.execute_command.side_effect = [5, []]
+        rc.arlen.return_value = 5
+        rc.argrep.return_value = []
         tool = self._get_tool(rc)
         tool(pattern="## *")
-        argrep_call = rc.execute_command.call_args_list[-1]
-        assert argrep_call.args[4] == "GLOB"
-        assert argrep_call.args[5] == "## *"
+        predicates = rc.argrep.call_args[0][3]
+        assert predicates[0][0] == ArrayPredicateType.GLOB
+        assert predicates[0][1] == "## *"
 
-    def test_regex_pattern_passed_through(self):
+    def test_regex_pattern_uses_re_predicate(self):
         rc = _make_redis()
-        rc.execute_command.side_effect = [5, []]
+        rc.arlen.return_value = 5
+        rc.argrep.return_value = []
         tool = self._get_tool(rc)
         tool(pattern="^save ")
-        argrep_call = rc.execute_command.call_args_list[-1]
-        assert argrep_call.args[4] == "RE"
+        predicates = rc.argrep.call_args[0][3]
+        assert predicates[0][0] == ArrayPredicateType.RE
 
     def test_results_parsed_correctly(self):
         rc = _make_redis()
-        rc.execute_command.side_effect = [5, [[2, "AOF is fast"], [7, "AOF flushes"]]]
+        rc.arlen.return_value = 5
+        rc.argrep.return_value = [[2, "AOF is fast"], [7, "AOF flushes"]]
         tool = self._get_tool(rc)
         result = tool(pattern="AOF")
         assert "L3: AOF is fast" in result   # 0-based index 2 → line 3
@@ -343,14 +356,16 @@ class TestArgrepSearchTool:
 
     def test_no_matches_returns_message(self):
         rc = _make_redis()
-        rc.execute_command.side_effect = [5, []]
+        rc.arlen.return_value = 5
+        rc.argrep.return_value = []
         tool = self._get_tool(rc)
         result = tool(pattern="NOTFOUND")
         assert "No lines matched" in result
 
     def test_includes_latency(self):
         rc = _make_redis()
-        rc.execute_command.side_effect = [5, [[0, "some line"]]]
+        rc.arlen.return_value = 5
+        rc.argrep.return_value = [[0, "some line"]]
         tool = self._get_tool(rc)
         result = tool(pattern="some")
         assert "latency:" in result
@@ -358,28 +373,28 @@ class TestArgrepSearchTool:
 
 class TestCountLinesTool:
     def _get_tool(self, redis_client, array_key="web:docs:test"):
-        from backend.agent import build_tools
-        return build_tools(redis_client, _make_vectorizer(), array_key, "web:idx:test")["count_lines"]
+        return _build_tools(redis_client, array_key)["count_lines"]
 
     def test_calls_arlen(self):
         rc = _make_redis()
-        rc.execute_command.side_effect = [None, 42]  # EXISTS pre-warm, ARLEN
+        rc.exists.return_value = 1   # pre-warm
+        rc.arlen.return_value = 42
         tool = self._get_tool(rc)
         result = tool()
-        arlen_call = rc.execute_command.call_args_list[-1]
-        assert arlen_call.args[0] == "ARLEN"
+        rc.arlen.assert_called_once_with("web:docs:test")
         assert "42" in result
 
     def test_includes_latency(self):
         rc = _make_redis()
-        rc.execute_command.side_effect = [None, 10]
+        rc.exists.return_value = 1
+        rc.arlen.return_value = 10
         tool = self._get_tool(rc)
         result = tool()
         assert "latency:" in result
 
     def test_redis_error_returns_error_string(self):
         rc = _make_redis()
-        rc.execute_command.side_effect = Exception("ARLEN failed")
+        rc.exists.side_effect = Exception("ARLEN failed")
         tool = self._get_tool(rc)
         result = tool()
         assert "Error" in result

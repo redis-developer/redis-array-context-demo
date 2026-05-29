@@ -13,6 +13,7 @@ import numpy as np
 import openai
 import redis
 from dotenv import load_dotenv
+from redis.commands.core import ArrayPredicateType
 from redisvl.index import SearchIndex
 from redisvl.query import VectorQuery
 from redisvl.schema import IndexSchema
@@ -121,12 +122,12 @@ def ingest_document(
 
     logger.info("Ingesting %s into Redis Array %s (%d lines)…", filepath, array_key, len(lines))
 
-    # ARINSERT appends one or more values at the Array's internal insert cursor.
+    # arinsert appends one or more values at the Array's internal insert cursor.
     # Batch in chunks of 500 to stay well within Redis command-size limits.
     BATCH = 500
     for i in range(0, len(lines), BATCH):
         chunk = lines[i:i + BATCH]
-        redis_client.execute_command("ARINSERT", array_key, *chunk)
+        redis_client.arinsert(array_key, *chunk)
 
     logger.info("Array ingestion complete. Building vector index %s…", index_name)
 
@@ -212,12 +213,14 @@ class TurnResult:
 def _make_argrep_search(redis_client: redis.Redis, array_key: str):
     def argrep_search(pattern: str) -> str:
         try:
-            array_len = redis_client.execute_command("ARLEN", array_key)
+            array_len = redis_client.arlen(array_key)
             end_idx = max(int(array_len) - 1, 0)
-            match_type, effective_pattern = _effective_argrep_pattern(pattern)
+            pred_type, effective_pattern = _effective_argrep_pattern(pattern)
             _t0 = time.perf_counter_ns()
-            raw = redis_client.execute_command(
-                "ARGREP", array_key, 0, end_idx, match_type, effective_pattern, "WITHVALUES"
+            raw = redis_client.argrep(
+                array_key, 0, end_idx,
+                [(pred_type, effective_pattern)],
+                withvalues=True,
             )
             elapsed = round((time.perf_counter_ns() - _t0) / 1_000_000, 3)
         except Exception as exc:
@@ -240,7 +243,7 @@ def _make_vector_search(
     redis_client: redis.Redis,
     vectorizer: OpenAITextVectorizer,
     array_key: str,
-    index_name: str,
+    idx: SearchIndex,
 ):
     def vector_search(query: str, top_k: int = 8) -> str:
         try:
@@ -251,12 +254,12 @@ def _make_vector_search(
                 return_fields=["line_number", "content", "vector_distance"],
                 num_results=top_k,
             )
-            idx = SearchIndex.from_existing(index_name, redis_client=redis_client)
-            redis_client.execute_command("ARLEN", array_key)  # pre-warm before timing
+            redis_client.arlen(array_key)  # pre-warm before timing
             _t0 = time.perf_counter_ns()
             results_raw = idx.query(vq)
             elapsed = round((time.perf_counter_ns() - _t0) / 1_000_000, 3)
         except Exception as exc:
+            logger.exception("vector_search failed")
             return f"Error running vector search: {exc}"
 
         if not results_raw:
@@ -278,17 +281,15 @@ def _make_fetch_lines(redis_client: redis.Redis, array_key: str):
         start_idx = start_line - 1
         end_idx = end_line - 1
         try:
-            redis_client.execute_command("ARLEN", array_key)
+            redis_client.arlen(array_key)  # pre-warm connection before timing
             if start_idx == end_idx:
                 _t0 = time.perf_counter_ns()
-                value = redis_client.execute_command("ARGET", array_key, start_idx)
+                value = redis_client.arget(array_key, start_idx)
                 elapsed = round((time.perf_counter_ns() - _t0) / 1_000_000, 3)
                 raw = [value] if value is not None else []
             else:
                 _t0 = time.perf_counter_ns()
-                raw = redis_client.execute_command(
-                    "ARGETRANGE", array_key, start_idx, end_idx
-                )
+                raw = redis_client.argetrange(array_key, start_idx, end_idx)
                 elapsed = round((time.perf_counter_ns() - _t0) / 1_000_000, 3)
         except Exception as exc:
             return f"Error fetching lines: {exc}"
@@ -308,15 +309,40 @@ def _make_fetch_lines(redis_client: redis.Redis, array_key: str):
 def _make_count_lines(redis_client: redis.Redis, array_key: str):
     def count_lines() -> str:
         try:
-            redis_client.execute_command("EXISTS", array_key)  # pre-warm before timing
+            redis_client.exists(array_key)  # pre-warm connection before timing
             _t0 = time.perf_counter_ns()
-            count = redis_client.execute_command("ARLEN", array_key)
+            count = redis_client.arlen(array_key)
             elapsed = round((time.perf_counter_ns() - _t0) / 1_000_000, 3)
         except Exception as exc:
             return f"Error running ARLEN: {exc}"
         return f"Document has {int(count)} lines. (latency: {elapsed}ms)"
 
     return count_lines
+
+
+def _make_search_index(redis_client: redis.Redis, index_name: str) -> SearchIndex:
+    """
+    Build a SearchIndex from the known schema without calling FT.INFO.
+
+    SearchIndex.from_existing() calls convert_index_info_to_schema() which
+    parses the FT.INFO response as a positional list — a format that Redis 8.8
+    no longer returns.  We already know the exact schema (it was written by
+    ingest_document), so we reconstruct it directly and avoid the broken path.
+    """
+    schema = IndexSchema.from_dict({
+        "index": {"name": index_name, "prefix": f"{index_name}:chunk"},
+        "fields": [
+            {"name": "line_number", "type": "numeric"},
+            {"name": "content", "type": "text"},
+            {"name": "embedding", "type": "vector", "attrs": {
+                "dims": VECTOR_DIM,
+                "distance_metric": "cosine",
+                "algorithm": "flat",
+                "datatype": "float32",
+            }},
+        ],
+    })
+    return SearchIndex(schema, redis_client=redis_client)
 
 
 def build_tools(
@@ -326,9 +352,10 @@ def build_tools(
     index_name: str,
 ) -> dict[str, Any]:
     """Return a map of tool name → callable."""
+    idx = _make_search_index(redis_client, index_name)
     return {
         "argrep_search": _make_argrep_search(redis_client, array_key),
-        "vector_search": _make_vector_search(redis_client, vectorizer, array_key, index_name),
+        "vector_search": _make_vector_search(redis_client, vectorizer, array_key, idx),
         "fetch_lines": _make_fetch_lines(redis_client, array_key),
         "count_lines": _make_count_lines(redis_client, array_key),
     }
@@ -562,7 +589,7 @@ def run_turn(executor: AgentExecutor, user_message: str) -> TurnResult:
 
             if tool_name == "argrep_search":
                 pattern = tool_args.get("pattern", "")
-                match_type, effective_pattern = _effective_argrep_pattern(pattern)
+                pred_type, effective_pattern = _effective_argrep_pattern(pattern)
                 call_results = _parse_grep_observation(observation)
                 for r in call_results:
                     r["latency_ms"] = latency
@@ -571,12 +598,12 @@ def run_turn(executor: AgentExecutor, user_message: str) -> TurnResult:
                 if not tool_reasoning:
                     tool_reasoning = f"Pattern search for: {pattern}"
                 tool_commands.append(
-                    f"ARGREP {executor.array_key} 0 … {match_type} {effective_pattern} WITHVALUES"
+                    f"ARGREP {executor.array_key} 0 … {pred_type.name} {effective_pattern} WITHVALUES"
                 )
 
             elif tool_name == "vector_search":
                 query = tool_args.get("query", "")
-                top_k = tool_args.get("top_k", 5)
+                top_k = tool_args.get("top_k", 8)
                 vector_results = _parse_vector_observation(observation)
                 vector_latency_ms = (vector_latency_ms or 0) + (latency or 0)
                 if not tool_reasoning:
@@ -668,38 +695,36 @@ def _parse_vector_observation(observation: str) -> list[dict]:
     return results
 
 
-def _detect_match_type(pattern: str) -> str:
+def _detect_match_type(pattern: str) -> ArrayPredicateType:
     """
-    Infer the ARGREP match type from the pattern string.
+    Infer the ARGREP predicate type from the pattern string.
 
     - RE    if the pattern contains regex-specific characters (^, $, +, (, ), |)
     - GLOB  if the pattern contains glob wildcards (*, ?, [, ])
-    - EXACT otherwise
+    - MATCH otherwise (native substring search — no wildcards needed)
     """
     if re.search(r"[\^$+()|]", pattern):
-        return "RE"
+        return ArrayPredicateType.RE
     if re.search(r"[*?\[\]]", pattern):
-        return "GLOB"
-    return "EXACT"
+        return ArrayPredicateType.GLOB
+    return ArrayPredicateType.MATCH
 
 
-def _effective_argrep_pattern(pattern: str) -> tuple[str, str]:
+def _effective_argrep_pattern(pattern: str) -> tuple[ArrayPredicateType, str]:
     """
-    Return (match_type, effective_pattern) for an ARGREP call.
+    Return (pred_type, effective_pattern) for an argrep call.
 
-    Plain text patterns (no regex or glob chars) are automatically wrapped in
-    glob wildcards so they act as a contains search rather than requiring the
-    entire line to equal the pattern exactly.
+    Plain text patterns use MATCH (native substring search) so the pattern is
+    passed through as-is without glob wrapping.  Glob and regex patterns are
+    detected automatically and passed through unchanged.
 
     Examples:
-      "AOF"      → ("GLOB", "*AOF*")
-      "## *"     → ("GLOB", "## *")        # already a glob
-      "^save "   → ("RE",   "^save ")      # regex passthrough
+      "AOF"      → (ArrayPredicateType.MATCH, "AOF")
+      "## *"     → (ArrayPredicateType.GLOB,  "## *")
+      "^save "   → (ArrayPredicateType.RE,    "^save ")
     """
-    match_type = _detect_match_type(pattern)
-    if match_type == "EXACT":
-        return "GLOB", f"*{pattern}*"
-    return match_type, pattern
+    pred_type = _detect_match_type(pattern)
+    return pred_type, pattern
 
 
 def _classify_tools(names: list[str]) -> str:

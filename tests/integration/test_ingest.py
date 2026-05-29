@@ -49,7 +49,7 @@ class TestIngestDocument:
 
         array_key, _ = ingest_document(redis_client, _make_vectorizer(), str(md))
 
-        assert redis_client.execute_command("ARLEN", array_key) == 3
+        assert redis_client.arlen(array_key) == 3
 
     def test_line_content_retrievable_via_arget(self, redis_client, tmp_path):
         md = tmp_path / "doc.md"
@@ -58,8 +58,8 @@ class TestIngestDocument:
         array_key, _ = ingest_document(redis_client, _make_vectorizer(), str(md))
 
         # ARGET is 0-based; line 1 → index 0, line 2 → index 1
-        assert redis_client.execute_command("ARGET", array_key, 0) == "# Heading"
-        assert redis_client.execute_command("ARGET", array_key, 1) == "Some content"
+        assert redis_client.arget(array_key, 0) == "# Heading"
+        assert redis_client.arget(array_key, 1) == "Some content"
 
     def test_blank_lines_preserved(self, redis_client, tmp_path):
         md = tmp_path / "doc.md"
@@ -68,8 +68,8 @@ class TestIngestDocument:
         array_key, _ = ingest_document(redis_client, _make_vectorizer(), str(md))
 
         # Blank line must be stored, not skipped, so line positions stay stable
-        assert redis_client.execute_command("ARLEN", array_key) == 3
-        assert redis_client.execute_command("ARGET", array_key, 1) == ""
+        assert redis_client.arlen(array_key) == 3
+        assert redis_client.arget(array_key, 1) == ""
 
     def test_idempotent_on_second_call(self, redis_client, tmp_path):
         """Calling ingest_document twice on the same key must not duplicate lines."""
@@ -81,7 +81,7 @@ class TestIngestDocument:
 
         assert key1 == key2
         assert idx1 == idx2
-        assert redis_client.execute_command("ARLEN", key1) == 2  # not 4
+        assert redis_client.arlen(key1) == 2  # not 4
 
     def test_key_uses_web_prefix_by_default(self, redis_client, tmp_path):
         md = tmp_path / "redis-arrays.md"

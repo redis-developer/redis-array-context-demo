@@ -55,7 +55,7 @@ def _make_vectorizer() -> MagicMock:
 @pytest.fixture()
 def populated_array(redis_client):
     """Load _LINES into the Redis Array before each test."""
-    redis_client.execute_command("ARINSERT", _ARRAY_KEY, *_LINES)
+    redis_client.arinsert(_ARRAY_KEY, *_LINES)
     # redis_client fixture handles flushall teardown
 
 
@@ -202,7 +202,7 @@ class TestCountLinesTool:
 
     def test_count_after_additional_insert(self, redis_client, populated_array):
         """ARLEN must reflect the current array length after new inserts."""
-        redis_client.execute_command("ARINSERT", _ARRAY_KEY, "extra line")
+        redis_client.arinsert(_ARRAY_KEY, "extra line")
         tools = build_tools(redis_client, _make_vectorizer(), _ARRAY_KEY, _INDEX_NAME)
         result = tools["count_lines"]()
         assert "7" in result

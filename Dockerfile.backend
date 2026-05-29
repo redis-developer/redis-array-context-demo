@@ -5,12 +5,16 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-COPY pyproject.toml ./
+# Install uv for fast, lockfile-reproducible installs
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+# Copy dependency files first so Docker can cache the install layer
+COPY pyproject.toml uv.lock ./
 COPY backend ./backend
 COPY cli ./cli
 COPY docs ./docs
 
-RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -e .
+# Install from the lockfile — honours the redis>=8.0.0 override
+RUN uv sync --frozen --no-dev
 
-CMD ["uvicorn", "backend.app:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uv", "run", "uvicorn", "backend.app:app", "--host", "0.0.0.0", "--port", "8000"]

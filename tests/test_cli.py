@@ -3,6 +3,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pytest
+from redis.commands.core import ArrayPredicateType
 from typer.testing import CliRunner
 
 from cli.main import app
@@ -119,11 +120,9 @@ class TestGrepCommand:
             return runner.invoke(app, ["grep", pattern, "--file", file])
 
     def test_grep_shows_matches(self):
-        rc = _mock_redis(arlen=10)
-        rc.execute_command.side_effect = [
-            10,                                # ARLEN pre-warm
-            [[2, "AOF is fast"], [7, "AOF again"]],  # ARGREP WITHVALUES
-        ]
+        rc = _mock_redis()
+        rc.arlen.return_value = 10
+        rc.argrep.return_value = [[2, "AOF is fast"], [7, "AOF again"]]
         result = self._run("AOF", redis_client=rc)
         assert result.exit_code == 0
         assert "AOF is fast" in result.output
@@ -131,14 +130,16 @@ class TestGrepCommand:
 
     def test_grep_shows_line_numbers(self):
         rc = _mock_redis()
-        rc.execute_command.side_effect = [10, [[4, "some line"]]]
+        rc.arlen.return_value = 10
+        rc.argrep.return_value = [[4, "some line"]]
         result = self._run("some", redis_client=rc)
         # 0-based index 4 → 1-based line 5
         assert "5" in result.output
 
     def test_grep_no_matches_shows_message(self):
         rc = _mock_redis()
-        rc.execute_command.side_effect = [10, []]
+        rc.arlen.return_value = 10
+        rc.argrep.return_value = []
         result = self._run("NOTFOUND", redis_client=rc)
         assert result.exit_code == 0
         assert "No matches" in result.output
@@ -152,9 +153,10 @@ class TestGrepCommand:
             result = runner.invoke(app, ["grep", "AOF"])
         assert result.exit_code != 0
 
-    def test_grep_plain_text_wrapped_as_glob(self):
+    def test_grep_plain_text_uses_match_predicate(self):
         rc = _mock_redis()
-        rc.execute_command.side_effect = [10, []]
+        rc.arlen.return_value = 10
+        rc.argrep.return_value = []
         with (
             patch("cli.main.load_config", return_value=_mock_config()),
             patch("cli.main.get_redis_client", return_value=rc),
@@ -162,20 +164,21 @@ class TestGrepCommand:
         ):
             runner.invoke(app, ["grep", "AOF", "--file", "docs/test.md"])
 
-        argrep_call = rc.execute_command.call_args_list[-1]
-        assert argrep_call.args[4] == "GLOB"
-        assert argrep_call.args[5] == "*AOF*"
+        predicates = rc.argrep.call_args[0][3]
+        assert predicates[0][0] == ArrayPredicateType.MATCH
+        assert predicates[0][1] == "AOF"
 
     def test_grep_shows_latency(self):
         rc = _mock_redis()
-        rc.execute_command.side_effect = [10, [[0, "line"]]]
+        rc.arlen.return_value = 10
+        rc.argrep.return_value = [[0, "line"]]
         result = self._run("line", redis_client=rc)
         # Table title includes latency in µs or ms
         assert "µs" in result.output or "ms" in result.output
 
     def test_grep_redis_error_exits_nonzero(self):
         rc = _mock_redis()
-        rc.execute_command.side_effect = Exception("connection refused")
+        rc.arlen.side_effect = Exception("connection refused")
         result = self._run("AOF", redis_client=rc)
         assert result.exit_code != 0
         assert "ARGREP failed" in result.output
@@ -201,11 +204,11 @@ class TestSearchCommand:
             patch("cli.main.load_config", return_value=_mock_config()),
             patch("cli.main.get_redis_client", return_value=rc),
             patch("cli.main.OpenAITextVectorizer") as mock_vec,
-            patch("redisvl.index.SearchIndex") as mock_si,
+            patch("backend.agent.SearchIndex") as mock_si,
             patch("redisvl.query.VectorQuery"),
         ):
             mock_vec.return_value.embed.return_value = [0.1] * 1536
-            mock_si.from_existing.return_value = mock_idx
+            mock_si.return_value = mock_idx
             return runner.invoke(app, ["search", query, "--file", file])
 
     def test_search_shows_content(self):

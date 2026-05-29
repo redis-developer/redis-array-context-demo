@@ -103,7 +103,7 @@ def load(
         )
     elapsed_s = (time.perf_counter_ns() - t0) / 1_000_000_000
 
-    line_count = redis_client.execute_command("ARLEN", final_key)
+    line_count = redis_client.arlen(final_key)
 
     console.print()
     console.print(f"[bold green]✓ Done[/bold green] in {elapsed_s:.1f}s")
@@ -134,20 +134,22 @@ def grep(
 
     try:
         # Pre-warm: get array length (needed for the range arg, excludes connection cost from timer).
-        array_len = redis_client.execute_command("ARLEN", array_key)
+        array_len = redis_client.arlen(array_key)
         end_idx = max(int(array_len) - 1, 0)
-        match_type, effective_pattern = _effective_argrep_pattern(pattern)
-        # Timer wraps only the ARGREP round-trip — same as backend.
+        pred_type, effective_pattern = _effective_argrep_pattern(pattern)
+        # Timer wraps only the argrep round-trip — same as backend.
         _t0 = time.perf_counter_ns()
-        raw = redis_client.execute_command(
-            "ARGREP", array_key, 0, end_idx, match_type, effective_pattern, "WITHVALUES"
+        raw = redis_client.argrep(
+            array_key, 0, end_idx,
+            [(pred_type, effective_pattern)],
+            withvalues=True,
         )
         elapsed = round((time.perf_counter_ns() - _t0) / 1_000_000, 3)
     except Exception as exc:
         console.print(f"[red]ARGREP failed: {exc}[/red]")
         raise typer.Exit(1)
 
-    # WITHVALUES returns nested pairs: [[idx, value], [idx, value], …]
+    # withvalues=True returns nested pairs: [[idx, value], [idx, value], …]
     # Array is 0-based internally; add 1 for 1-based display.
     results = [(int(pair[0]) + 1, pair[1]) for pair in (raw or [])]
 
@@ -156,7 +158,7 @@ def grep(
         return
 
     table = Table(
-        title=f"ARGREP  {match_type} '{effective_pattern}'  ({_fmt_latency(elapsed)})",
+        title=f"ARGREP  {pred_type.name} '{effective_pattern}'  ({_fmt_latency(elapsed)})",
         show_header=True,
     )
     table.add_column("Line", style="bold yellow", justify="right", no_wrap=True)
@@ -180,8 +182,8 @@ def search(
 
     Returns the most semantically relevant chunks with similarity scores.
     """
-    from redisvl.index import SearchIndex
     from redisvl.query import VectorQuery
+    from backend.agent import _make_search_index
 
     config, redis_client = _get_clients()
     vectorizer = OpenAITextVectorizer(
@@ -204,8 +206,8 @@ def search(
             return_fields=["line_number", "content", "vector_distance"],
             num_results=top_k,
         )
-        idx = SearchIndex.from_existing(index_name, redis_client=redis_client)
-        redis_client.execute_command("EXISTS", index_name)  # pre-warm before timing
+        idx = _make_search_index(redis_client, index_name)
+        redis_client.exists(index_name)  # pre-warm before timing
         _t0 = time.perf_counter_ns()
         results_raw = idx.query(vq)
         elapsed = round((time.perf_counter_ns() - _t0) / 1_000_000, 3)
